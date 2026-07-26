@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --hui-primary: #0D9488;
+  --hui-primary-dark: #0A7970;
+  --hui-primary-light: #CCFBF1;
+  --hui-accent: #D97706;
+  --hui-accent-light: #FEF3C7;
+  --hui-surface: #FFFFFF;
+  --hui-bg: #F8F7F4;
+  --hui-text: #1C1917;
+  --hui-text-secondary: #78716C;
+  --hui-text-tertiary: #A8A29E;
+  --hui-border: #E7E5E4;
+  --hui-success: #059669;
+  --hui-success-light: #D1FAE5;
+  --hui-warning: #D97706;
+  --hui-warning-light: #FEF3C7;
+  --hui-error: #DC2626;
+  --hui-error-light: #FEE2E2;
+}
+
+body {
+  background-color: var(--hui-bg);
+  color: var(--hui-text);
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-white border border-hui-border shadow-sm p-6;
+  }
+  
+  .btn-primary {
+    @apply bg-hui-primary text-white rounded-xl px-6 py-3 font-medium hover:bg-hui-primary-dark transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply bg-hui-primary-light text-hui-primary rounded-xl px-6 py-3 font-medium hover:bg-teal-100 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-ghost {
+    @apply bg-transparent text-hui-text-secondary rounded-xl px-6 py-3 font-medium hover:bg-stone-100 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .input {
+    @apply rounded-xl border border-hui-border px-4 py-3 bg-white focus:border-hui-primary focus:ring-2 focus:ring-hui-primary/20 outline-none transition-all w-full;
+  }
+  
+  .badge {
+    @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-medium;
+  }
+  
+  .badge-success {
+    @apply badge bg-hui-success-light text-hui-success;
+  }
+  
+  .badge-warning {
+    @apply badge bg-hui-warning-light text-hui-warning;
+  }
+  
+  .badge-error {
+    @apply badge bg-hui-error-light text-hui-error;
+  }
+  
+  .badge-info {
+    @apply badge bg-hui-primary-light text-hui-primary;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hui-border);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--hui-text-tertiary);
+}
