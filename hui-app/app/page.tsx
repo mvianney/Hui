@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useWallet } from '@/components/wallet/WalletButton';
 import { useHui } from '@/lib/huiContext';
+import { FaucetButton } from '@/components/wallet/FaucetButton';
 
 export default function LandingPage() {
   const { connected } = useWallet();
@@ -63,6 +64,12 @@ export default function LandingPage() {
             </>
           )}
         </div>
+        
+        {isReady && connected && (
+          <div className="max-w-md mx-auto mt-6">
+            <FaucetButton />
+          </div>
+        )}
       </section>
 
       {/* How It Works Section */}
