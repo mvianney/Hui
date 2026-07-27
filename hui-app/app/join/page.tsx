@@ -20,6 +20,7 @@ function JoinInner() {
   const [displayName, setDisplayName] = useState('');
   const [nameError, setNameError] = useState('');
   const [joined, setJoined] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (code.length === 8) handleLookup();
@@ -30,6 +31,7 @@ function JoinInner() {
     setLookupError('');
     setCircle(null);
     setSelectedSlot(null);
+    setIsExpanded(false);
     if (code.length < 6) { setLookupError('Code must be at least 6 characters'); return; }
     setLooking(true);
     const found = await lookupInviteCode(code);
@@ -49,6 +51,8 @@ function JoinInner() {
   }
 
   const mySlot = circle?.slots.find(s => s.member?.wallet === publicKey);
+  const creatorMember = circle?.members.find(m => m.wallet === circle.creator);
+  const creatorName = creatorMember?.displayName || (circle ? circle.creator.slice(0, 6) + '…' : '');
 
   if (!connected) {
     return (
@@ -107,18 +111,6 @@ function JoinInner() {
 
         {circle && (
           <div className="space-y-5">
-            <div className="card">
-              <h2 className="text-xl font-bold text-hui-text mb-1">{circle.name}</h2>
-              <div className="flex gap-4 text-sm text-hui-text-secondary flex-wrap">
-                <span>${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC / round</span>
-                <span>{circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'}</span>
-                <span>{circle.totalRounds} members</span>
-                <span className={`badge ${circle.slotsFilled < circle.totalRounds ? 'badge-info' : 'badge-success'}`}>
-                  {circle.totalRounds - circle.slotsFilled} slots open
-                </span>
-              </div>
-            </div>
-
             {mySlot ? (
               <div className="card bg-hui-success-light border-hui-success text-center">
                 <p className="font-medium text-hui-success">You already hold Slot {mySlot.index + 1} in this circle.</p>
@@ -127,69 +119,112 @@ function JoinInner() {
                 </button>
               </div>
             ) : (
-              <>
-                <div className="card">
-                  <h3 className="font-semibold text-hui-text mb-3">Pick Your Payout Slot</h3>
-                  <p className="text-xs text-hui-text-secondary mb-4">
-                    The slot number is the round in which you receive the full pot. Earlier slots pay out sooner.
-                  </p>
-                  <div className="grid grid-cols-5 gap-2">
-                    {circle.slots.map(slot => {
-                      const taken = slot.member !== null;
-                      const selected = selectedSlot === slot.index;
-                      return (
-                        <button
-                          key={slot.index}
-                          disabled={taken}
-                          onClick={() => setSelectedSlot(slot.index)}
-                          title={taken ? `Taken by ${slot.member?.displayName || slot.member?.wallet.slice(0, 6)}` : `Round ${slot.round}`}
-                          className={[
-                            'relative rounded-xl p-3 text-center border-2 transition-all duration-150',
-                            taken
-                              ? 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed'
-                              : selected
-                              ? 'bg-hui-primary border-hui-primary text-white shadow-lg scale-105'
-                              : 'bg-white border-hui-border text-hui-text hover:border-hui-primary hover:scale-105 cursor-pointer',
-                          ].join(' ')}
-                        >
-                          <div className="text-lg font-bold">{slot.round}</div>
-                          <div className="text-xs mt-0.5">{taken ? slot.member?.displayName || '●' : 'Open'}</div>
-                          {taken && (
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-hui-primary rounded-full flex items-center justify-center">
-                              <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                              </svg>
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
+              <div className="card overflow-hidden transition-all duration-300">
+                {/* Clickable Header Section */}
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="w-full text-left focus:outline-none"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-2xl font-bold text-hui-text mb-1">{circle.name}</h2>
+                      <p className="text-sm text-hui-text-secondary">Created by <strong className="text-hui-text">{creatorName}</strong></p>
+                    </div>
+                    <span className="text-hui-primary transition-transform duration-300 transform font-semibold">
+                      {isExpanded ? 'Collapse ▲' : 'Join Circle ▼'}
+                    </span>
                   </div>
-                  {selectedSlot !== null && (
-                    <p className="text-sm text-hui-primary font-medium mt-3">
-                      ✓ Slot {selectedSlot + 1} selected — you receive the pot in Round {selectedSlot + 1}
-                    </p>
-                  )}
-                </div>
 
-                {selectedSlot !== null && (
-                  <div className="card">
-                    <label className="block text-sm font-medium text-hui-text mb-1.5">Your Display Name</label>
-                    <input
-                      className="input w-full"
-                      placeholder="e.g. Lan, Uncle Minh…"
-                      value={displayName}
-                      onChange={e => setDisplayName(e.target.value.slice(0, 32))}
-                      maxLength={32}
-                    />
-                    <p className="text-xs text-hui-text-tertiary mt-1">Shown to other members on the dashboard.</p>
-                    {nameError && <p className="text-hui-error text-sm mt-1">{nameError}</p>}
+                  <div className="flex gap-4 text-sm text-hui-text-secondary flex-wrap mt-4 border-t border-hui-border/50 pt-4">
+                    <span>${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC / round</span>
+                    <span>{circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'}</span>
+                    <span>{circle.slotsFilled} / {circle.totalRounds} members</span>
+                    <span className={`badge ${circle.slotsFilled < circle.totalRounds ? 'badge-info' : 'badge-success'}`}>
+                      {circle.totalRounds - circle.slotsFilled} open
+                    </span>
+                  </div>
+
+                  {!isExpanded && (
+                    <div className="mt-4 flex items-center justify-center p-2.5 bg-hui-primary-light text-hui-primary font-medium text-sm rounded-xl animate-pulse">
+                      Tap here to pick your slot & join
+                    </div>
+                  )}
+                </button>
+
+                {/* Collapsible Content Area */}
+                <div
+                  className={[
+                    'transition-all duration-300 ease-in-out overflow-hidden',
+                    isExpanded ? 'max-h-[800px] opacity-100 mt-6 pt-6 border-t border-hui-border' : 'max-h-0 opacity-0',
+                  ].join(' ')}
+                >
+                  <div className="space-y-5">
+                    {/* Your Display Name */}
+                    <div>
+                      <label className="block text-sm font-medium text-hui-text mb-1.5">Your Display Name</label>
+                      <input
+                        className="input w-full"
+                        placeholder="e.g. Lan, Uncle Minh…"
+                        value={displayName}
+                        onChange={e => setDisplayName(e.target.value.slice(0, 32))}
+                        maxLength={32}
+                      />
+                      <p className="text-xs text-hui-text-tertiary mt-1">Shown to other members on the dashboard.</p>
+                    </div>
+
+                    {/* Pick Slot */}
+                    <div>
+                      <h3 className="font-semibold text-hui-text text-sm mb-3">Pick Your Payout Slot</h3>
+                      <p className="text-xs text-hui-text-secondary mb-4">
+                        The slot number corresponds to the round you will receive the full pot.
+                      </p>
+                      <div className="grid grid-cols-5 gap-2">
+                        {circle.slots.map(slot => {
+                          const taken = slot.member !== null;
+                          const selected = selectedSlot === slot.index;
+                          return (
+                            <button
+                              key={slot.index}
+                              disabled={taken}
+                              onClick={() => setSelectedSlot(slot.index)}
+                              title={taken ? `Taken by ${slot.member?.displayName || slot.member?.wallet.slice(0, 6)}` : `Round ${slot.round}`}
+                              className={[
+                                'relative rounded-xl p-3 text-center border-2 transition-all duration-150',
+                                taken
+                                  ? 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed'
+                                  : selected
+                                  ? 'bg-hui-primary border-hui-primary text-white shadow-lg scale-105'
+                                  : 'bg-white border-hui-border text-hui-text hover:border-hui-primary hover:scale-105 cursor-pointer',
+                              ].join(' ')}
+                            >
+                              <div className="text-lg font-bold">{slot.round}</div>
+                              <div className="text-xs mt-0.5">{taken ? slot.member?.displayName || '●' : 'Open'}</div>
+                              {taken && (
+                                <div className="absolute -top-1 -right-1 w-4 h-4 bg-hui-primary rounded-full flex items-center justify-center">
+                                  <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {selectedSlot !== null && (
+                        <p className="text-sm text-hui-primary font-medium mt-3">
+                          ✓ Slot {selectedSlot + 1} selected — you receive the pot in Round {selectedSlot + 1}
+                        </p>
+                      )}
+                    </div>
+
+                    {nameError && <p className="text-hui-error text-sm">{nameError}</p>}
                     <button onClick={handleJoin} disabled={isLoading} className="btn-primary w-full mt-4">
-                      {isLoading ? 'Joining…' : `Join Slot ${selectedSlot + 1}`}
+                      {isLoading ? 'Joining…' : `Join Slot ${selectedSlot !== null ? selectedSlot + 1 : ''}`}
                     </button>
                   </div>
-                )}
-              </>
+                </div>
+              </div>
             )}
           </div>
         )}

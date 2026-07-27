@@ -203,7 +203,24 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
         return shortCode === code.toUpperCase();
       });
       if (!match) return null;
-      return circleFromOnChain(match.publicKey, match.account);
+      const circle = circleFromOnChain(match.publicKey, match.account);
+
+      // Resolve display names
+      for (const slot of circle.slots) {
+        if (!slot.member) continue;
+        const memberPubkey = new PublicKey(slot.member.wallet);
+        const [recordPda] = findMemberRecordPda(match.publicKey, memberPubkey);
+        try {
+          const record = await (program.account as any).memberRecord.fetch(recordPda);
+          slot.member.displayName = record.displayName;
+          slot.member.roundsContributed = record.roundsContributed;
+          slot.member.roundsMissed = record.roundsMissed;
+          slot.member.receivedPayout = record.receivedPayout;
+        } catch { /* record not yet created */ }
+      }
+      circle.members = circle.slots.filter(s => s.member !== null).map(s => s.member!);
+
+      return circle;
     } catch (e) {
       console.error('lookupInviteCode', e);
       return null;
