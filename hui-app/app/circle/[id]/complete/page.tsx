@@ -12,9 +12,7 @@ export default function CircleCompletePage() {
   const { publicKey } = useWallet();
 
   useEffect(() => {
-    if (id) {
-      loadCircle(id);
-    }
+    if (id) loadCircle(id);
   }, [id, loadCircle]);
 
   if (isLoading || !currentCircle) {
@@ -29,17 +27,16 @@ export default function CircleCompletePage() {
   }
 
   if (currentCircle.status !== 'completed') {
-    if (typeof window !== 'undefined') {
-      router.push(`/circle/${id}`);
-    }
+    if (typeof window !== 'undefined') router.push(`/circle/${id}`);
     return null;
   }
 
-  const totalPot = currentCircle.contributionAmount * currentCircle.members.length;
-  const totalDistributed = totalPot * currentCircle.totalRounds;
+  const amountUsdc = currentCircle.contributionAmount / 1_000_000;
+  const totalPotUsdc = amountUsdc * currentCircle.members.length;
+  const frequencyLabel = currentCircle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly';
 
   const handleShare = () => {
-    addToast('info', 'Coming soon: downloadable on-chain proof');
+    addToast('Coming soon: downloadable on-chain proof', 'info');
   };
 
   return (
@@ -47,7 +44,9 @@ export default function CircleCompletePage() {
       {/* Celebration Header */}
       <div className="text-center space-y-4">
         <div className="w-20 h-20 bg-gradient-to-br from-hui-success to-teal-400 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-teal-200">
-          <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+          <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
         </div>
         <h1 className="text-3xl font-bold text-hui-text">Circle Completed!</h1>
         <p className="text-hui-text-secondary">All rounds have finished and payouts distributed.</p>
@@ -57,7 +56,7 @@ export default function CircleCompletePage() {
       <div className="bg-hui-surface rounded-2xl border border-hui-border shadow-sm p-6 grid grid-cols-2 gap-6">
         <div>
           <p className="text-sm font-medium text-hui-text-secondary mb-1">Total Distributed</p>
-          <p className="text-2xl font-bold text-hui-primary">{totalDistributed} USDC</p>
+          <p className="text-2xl font-bold text-hui-primary">${(totalPotUsdc * currentCircle.totalRounds).toFixed(0)} USDC</p>
         </div>
         <div>
           <p className="text-sm font-medium text-hui-text-secondary mb-1">Rounds</p>
@@ -65,27 +64,22 @@ export default function CircleCompletePage() {
         </div>
         <div>
           <p className="text-sm font-medium text-hui-text-secondary mb-1">Per Round Pot</p>
-          <p className="text-lg font-bold text-hui-text">{totalPot} USDC</p>
+          <p className="text-lg font-bold text-hui-text">${totalPotUsdc.toFixed(0)} USDC</p>
         </div>
         <div>
           <p className="text-sm font-medium text-hui-text-secondary mb-1">Frequency</p>
-          <p className="text-lg font-bold text-hui-text capitalize">{currentCircle.frequency}</p>
-        </div>
-        <div className="col-span-2 pt-4 border-t border-hui-border">
-          <p className="text-sm font-medium text-hui-text-secondary mb-1">Completion Date</p>
-          <p className="text-base font-medium text-hui-text">
-            {new Date(currentCircle.rounds[currentCircle.rounds.length - 1].dueDate).toLocaleDateString('en-US', {
-              year: 'numeric', month: 'long', day: 'numeric'
-            })}
-          </p>
+          <p className="text-lg font-bold text-hui-text">{frequencyLabel}</p>
         </div>
       </div>
 
-      {/* Shareable Reputation Card for Connected User */}
-      {publicKey && currentCircle.members.some(m => m.walletAddress === publicKey) && (() => {
-        const myRep = getMemberReputation(currentCircle, publicKey);
-        const myMember = currentCircle.members.find(m => m.walletAddress === publicKey);
-        if (!myRep || !myMember) return null;
+      {/* Shareable Reputation Card for connected member */}
+      {publicKey && (() => {
+        const myMember = currentCircle.members.find(m => m.wallet === publicKey);
+        const myRep = publicKey ? getMemberReputation(currentCircle, publicKey) : null;
+        if (!myMember || !myRep) return null;
+        const completionRate = currentCircle.totalRounds > 0
+          ? Math.round((myRep.roundsContributed / currentCircle.totalRounds) * 100)
+          : 0;
 
         return (
           <div className="relative">
@@ -99,28 +93,29 @@ export default function CircleCompletePage() {
                   <h3 className="text-xl font-bold">{currentCircle.name}</h3>
                 </div>
                 <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20">
-                  <svg className="w-5 h-5 text-hui-accent-light" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                  <svg className="w-5 h-5 text-yellow-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
                 </div>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <p className="text-stone-400 text-sm mb-1">Participant</p>
-                  <p className="font-bold text-lg">{myMember.displayName}</p>
+                  <p className="font-bold text-lg">{myMember.displayName || myMember.wallet.slice(0, 8) + '…'}</p>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white/5 rounded-xl p-3 border border-white/10">
                     <p className="text-stone-400 text-xs mb-1">Completion Rate</p>
-                    <p className={`text-xl font-bold ${myRep.completionRate === 100 ? 'text-green-300' : 'text-amber-300'}`}>
-                      {myRep.completionRate}%
+                    <p className={`text-xl font-bold ${completionRate === 100 ? 'text-green-300' : 'text-amber-300'}`}>
+                      {completionRate}%
                     </p>
-                    <p className="text-stone-500 text-xs">{myRep.roundsCompleted}/{myRep.totalRounds} rounds</p>
+                    <p className="text-stone-500 text-xs">{myRep.roundsContributed}/{currentCircle.totalRounds} rounds</p>
                   </div>
                   <div className="bg-white/5 rounded-xl p-3 border border-white/10">
                     <p className="text-stone-400 text-xs mb-1">Pot Received</p>
-                    <p className="text-xl font-bold text-white">{totalPot} USDC</p>
-                    <p className="text-stone-500 text-xs">Round {myRep.payoutRound}</p>
+                    <p className="text-xl font-bold text-white">${totalPotUsdc.toFixed(0)} USDC</p>
+                    <p className="text-stone-500 text-xs">Round {myMember.payoutRound}</p>
                   </div>
                 </div>
               </div>
@@ -143,34 +138,29 @@ export default function CircleCompletePage() {
         <h2 className="text-lg font-bold text-hui-text mb-4">Final Member Records</h2>
         <div className="space-y-3">
           {currentCircle.members.map(member => {
-            const rep = getMemberReputation(currentCircle, member.walletAddress);
+            const rep = getMemberReputation(currentCircle, member.wallet);
             if (!rep) return null;
-
-            let rateColorBg = 'bg-hui-error-light';
-            let rateColorText = 'text-hui-error';
-            if (rep.completionRate === 100) {
-              rateColorBg = 'bg-hui-success-light';
-              rateColorText = 'text-hui-success';
-            } else if (rep.completionRate >= 80) {
-              rateColorBg = 'bg-hui-warning-light';
-              rateColorText = 'text-hui-warning';
-            }
+            const rate = currentCircle.totalRounds > 0
+              ? Math.round((rep.roundsContributed / currentCircle.totalRounds) * 100)
+              : 0;
+            const rateColorBg = rate === 100 ? 'bg-hui-success-light' : rate >= 80 ? 'bg-hui-warning-light' : 'bg-hui-error-light';
+            const rateColorText = rate === 100 ? 'text-hui-success' : rate >= 80 ? 'text-hui-warning' : 'text-hui-error';
 
             return (
-              <div key={member.walletAddress} className="bg-hui-surface rounded-2xl border border-hui-border p-4 flex items-center justify-between">
+              <div key={member.wallet} className="bg-hui-surface rounded-2xl border border-hui-border p-4 flex items-center justify-between">
                 <div>
-                  <p className="font-bold text-hui-text">{member.displayName}</p>
-                  <p className="text-xs text-hui-text-secondary">{member.walletAddress}</p>
-                  <p className="text-xs text-hui-text-tertiary mt-1">Received pot in Round {rep.payoutRound}</p>
+                  <p className="font-bold text-hui-text">{member.displayName || '—'}</p>
+                  <p className="text-xs text-hui-text-secondary font-mono">{member.wallet.slice(0, 6)}…{member.wallet.slice(-4)}</p>
+                  <p className="text-xs text-hui-text-tertiary mt-1">Received pot in Round {member.payoutRound}</p>
                   {rep.roundsMissed > 0 && (
                     <p className="text-xs text-hui-warning mt-1">Missed {rep.roundsMissed} round{rep.roundsMissed > 1 ? 's' : ''}</p>
                   )}
                 </div>
                 <div className="flex flex-col items-end">
                   <div className={`px-3 py-1 rounded-full text-sm font-bold ${rateColorBg} ${rateColorText}`}>
-                    {rep.completionRate}%
+                    {rate}%
                   </div>
-                  <span className="text-xs text-hui-text-tertiary mt-1">{rep.roundsCompleted}/{rep.totalRounds}</span>
+                  <span className="text-xs text-hui-text-tertiary mt-1">{rep.roundsContributed}/{currentCircle.totalRounds}</span>
                 </div>
               </div>
             );
@@ -178,12 +168,8 @@ export default function CircleCompletePage() {
         </div>
       </div>
 
-      {/* Back to Dashboard */}
       <div className="text-center pb-8">
-        <button
-          onClick={() => router.push('/')}
-          className="text-hui-primary font-medium hover:underline"
-        >
+        <button onClick={() => router.push('/')} className="text-hui-primary font-medium hover:underline">
           ← Back to Home
         </button>
       </div>

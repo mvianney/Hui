@@ -1,158 +1,207 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useHui } from '@/lib/huiContext';
 import { useWallet } from '@/components/wallet/WalletButton';
-import { useRouter } from 'next/navigation';
 import { Circle } from '@/lib/types';
 
-export default function JoinCirclePage() {
-  const { connected, publicKey, connect } = useWallet();
-  const { lookupInviteCode, joinCircle, addToast } = useHui();
+function JoinInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { connected, publicKey } = useWallet();
+  const { lookupInviteCode, joinCircle, isLoading } = useHui();
 
-  const [inviteCode, setInviteCode] = useState('');
+  const [code, setCode] = useState(searchParams.get('code') ?? '');
+  const [circle, setCircle] = useState<Circle | null>(null);
+  const [lookupError, setLookupError] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState('');
-  const [isLookingUp, setIsLookingUp] = useState(false);
-  const [isJoining, setIsJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [foundCircle, setFoundCircle] = useState<Circle | null>(null);
+  const [nameError, setNameError] = useState('');
+  const [joined, setJoined] = useState(false);
 
-  const handleLookup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteCode || inviteCode.length !== 6) return;
-    
-    setIsLookingUp(true);
-    setError(null);
-    try {
-      const circle = await lookupInviteCode(inviteCode);
-      if (circle) {
-        setFoundCircle(circle);
-      } else {
-        setError('No circle found with this code');
-        setFoundCircle(null);
-      }
-    } catch {
-      setError('An error occurred while looking up the code');
-      setFoundCircle(null);
-    } finally {
-      setIsLookingUp(false);
-    }
-  };
+  useEffect(() => {
+    if (code.length === 8) handleLookup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleJoin = async () => {
-    if (!connected || !publicKey || !foundCircle || !displayName) return;
-    
-    setIsJoining(true);
-    try {
-      const result = joinCircle(foundCircle.id, publicKey, displayName);
-      if (result) {
-        router.push(`/circle/${foundCircle.id}`);
-      }
-    } catch {
-      addToast('error', 'Could not join the circle. It may be full.');
-    } finally {
-      setIsJoining(false);
-    }
-  };
+  async function handleLookup() {
+    setLookupError('');
+    setCircle(null);
+    setSelectedSlot(null);
+    if (code.length < 6) { setLookupError('Code must be at least 6 characters'); return; }
+    setLooking(true);
+    const found = await lookupInviteCode(code);
+    setLooking(false);
+    if (!found) { setLookupError('No circle found with this code'); return; }
+    if (found.status !== 'pending') { setLookupError('This circle is no longer accepting members'); return; }
+    setCircle(found);
+  }
+
+  async function handleJoin() {
+    if (!connected) return;
+    if (selectedSlot === null) { setNameError('Pick a slot first'); return; }
+    if (!displayName.trim()) { setNameError('Display name is required'); return; }
+    setNameError('');
+    const ok = await joinCircle(circle!.id, selectedSlot, displayName.trim());
+    if (ok) setJoined(true);
+  }
+
+  const mySlot = circle?.slots.find(s => s.member?.wallet === publicKey);
 
   if (!connected) {
     return (
-      <div className="max-w-lg mx-auto py-12 px-4 text-center">
-        <h1 className="text-2xl font-bold text-hui-text mb-4">Connect Wallet to Join a Circle</h1>
-        <p className="text-hui-text-secondary mb-8">You need to connect your wallet to join an existing Hụi circle.</p>
-        <button onClick={connect} className="bg-hui-primary text-white rounded-xl px-6 py-3 font-medium hover:bg-hui-primary-dark transition-all duration-200">
-          Connect Wallet
-        </button>
+      <div className="min-h-screen flex items-center justify-center bg-hui-bg px-4">
+        <div className="card text-center max-w-sm w-full">
+          <div className="text-4xl mb-4">🔗</div>
+          <h1 className="text-xl font-bold text-hui-text mb-2">Connect Your Wallet</h1>
+          <p className="text-hui-text-secondary text-sm">You need a connected wallet to join a circle.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (joined) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-hui-bg px-4">
+        <div className="card text-center max-w-sm w-full">
+          <div className="text-5xl mb-4">✅</div>
+          <h1 className="text-2xl font-bold text-hui-text mb-2">You&apos;re In!</h1>
+          <p className="text-hui-text-secondary text-sm mb-6">
+            You claimed Slot {selectedSlot! + 1} — you&apos;ll receive the payout in Round {selectedSlot! + 1}.
+          </p>
+          <button onClick={() => router.push(`/circle/${circle!.id}`)} className="btn-primary w-full">
+            Go to Circle Dashboard →
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-lg mx-auto py-8 px-4">
-      <h1 className="text-2xl font-bold text-hui-text mb-6">Join Circle</h1>
-      
-      {!foundCircle ? (
-        <form onSubmit={handleLookup} className="bg-hui-surface rounded-2xl border border-hui-border shadow-sm p-6 space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-hui-text mb-2">Invite Code</label>
-            <input 
-              type="text" 
-              required 
-              maxLength={6}
-              value={inviteCode} 
-              onChange={e => setInviteCode(e.target.value.toUpperCase())} 
-              placeholder="XXXXXX" 
-              className="w-full rounded-xl border border-hui-border bg-white px-4 py-3 text-hui-text focus:outline-none focus:ring-2 focus:ring-hui-primary focus:border-transparent transition-all uppercase tracking-widest text-center text-xl font-medium" 
+    <div className="min-h-screen bg-hui-bg px-4 py-12">
+      <div className="max-w-lg mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-hui-text mb-2">Join a Circle</h1>
+          <p className="text-hui-text-secondary">Enter an invite code, then pick your payout slot.</p>
+        </div>
+
+        <div className="card mb-6">
+          <label className="block text-sm font-medium text-hui-text mb-1.5">Invite Code</label>
+          <div className="flex gap-2">
+            <input
+              className="input flex-1 uppercase tracking-widest font-mono text-lg"
+              placeholder="ABCD1234"
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase().slice(0, 8))}
+              onKeyDown={e => e.key === 'Enter' && handleLookup()}
+              maxLength={8}
             />
-          </div>
-          
-          {error && <p className="text-hui-error text-sm">{error}</p>}
-          
-          <button type="submit" disabled={isLookingUp || inviteCode.length !== 6} className="w-full bg-hui-primary text-white rounded-xl px-6 py-3 font-medium hover:bg-hui-primary-dark transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-            {isLookingUp ? 'Looking up...' : 'Look Up Circle'}
-          </button>
-        </form>
-      ) : (
-        <div className="bg-hui-surface rounded-2xl border border-hui-border shadow-sm p-6 space-y-6">
-          <div className="flex justify-between items-start mb-2">
-            <h2 className="text-xl font-bold text-hui-text">{foundCircle.name}</h2>
-            <button onClick={() => setFoundCircle(null)} className="text-sm text-hui-primary hover:underline">Change Code</button>
-          </div>
-          
-          <div className="flex items-center gap-4 text-hui-text-secondary text-sm bg-hui-bg p-4 rounded-xl border border-hui-border">
-            <div className="flex flex-col">
-              <span className="font-medium text-hui-text">{foundCircle.contributionAmount} USDC</span>
-              <span>Contribution</span>
-            </div>
-            <div className="w-px h-8 bg-hui-border"></div>
-            <div className="flex flex-col">
-              <span className="font-medium text-hui-text capitalize">{foundCircle.frequency}</span>
-              <span>Frequency</span>
-            </div>
-          </div>
-          
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium text-hui-text">Members</span>
-              <span className="text-sm text-hui-text-secondary">{foundCircle.members.filter(m => m.hasJoined).length} of {foundCircle.totalRounds} joined</span>
-            </div>
-            <div className="space-y-2">
-              {foundCircle.members.filter(m => m.hasJoined).map((member) => (
-                <div key={member.walletAddress} className="flex items-center justify-between p-3 rounded-xl bg-hui-bg border border-hui-border">
-                  <span className="font-medium text-hui-text">{member.displayName}</span>
-                  <span className="text-xs text-hui-text-tertiary truncate max-w-[100px]">{member.walletAddress.slice(0, 4)}...{member.walletAddress.slice(-4)}</span>
-                </div>
-              ))}
-              {foundCircle.members.filter(m => !m.hasJoined).map((_, i) => (
-                <div key={`empty-${i}`} className="flex items-center p-3 rounded-xl bg-white border border-dashed border-hui-border">
-                  <span className="text-hui-text-tertiary italic">Available Slot</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          <div className="pt-4 border-t border-hui-border">
-            <label className="block text-sm font-medium text-hui-text mb-2">Your Display Name</label>
-            <input 
-              type="text" 
-              required 
-              value={displayName} 
-              onChange={e => setDisplayName(e.target.value)} 
-              placeholder="e.g. Nguyễn Văn A" 
-              className="w-full rounded-xl border border-hui-border bg-white px-4 py-3 text-hui-text focus:outline-none focus:ring-2 focus:ring-hui-primary focus:border-transparent transition-all mb-4" 
-            />
-            
-            <button 
-              onClick={handleJoin} 
-              disabled={isJoining || !displayName || foundCircle.members.length >= foundCircle.totalRounds} 
-              className="w-full bg-hui-primary text-white rounded-xl px-6 py-3 font-medium hover:bg-hui-primary-dark transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isJoining ? 'Joining...' : 'Join Circle'}
+            <button onClick={handleLookup} disabled={looking} className="btn-primary px-5">
+              {looking ? '…' : 'Look Up'}
             </button>
           </div>
+          {lookupError && <p className="text-hui-error text-sm mt-2">{lookupError}</p>}
         </div>
-      )}
+
+        {circle && (
+          <div className="space-y-5">
+            <div className="card">
+              <h2 className="text-xl font-bold text-hui-text mb-1">{circle.name}</h2>
+              <div className="flex gap-4 text-sm text-hui-text-secondary flex-wrap">
+                <span>${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC / round</span>
+                <span>{circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'}</span>
+                <span>{circle.totalRounds} members</span>
+                <span className={`badge ${circle.slotsFilled < circle.totalRounds ? 'badge-info' : 'badge-success'}`}>
+                  {circle.totalRounds - circle.slotsFilled} slots open
+                </span>
+              </div>
+            </div>
+
+            {mySlot ? (
+              <div className="card bg-hui-success-light border-hui-success text-center">
+                <p className="font-medium text-hui-success">You already hold Slot {mySlot.index + 1} in this circle.</p>
+                <button onClick={() => router.push(`/circle/${circle.id}`)} className="btn-primary mt-3">
+                  Go to Dashboard →
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="card">
+                  <h3 className="font-semibold text-hui-text mb-3">Pick Your Payout Slot</h3>
+                  <p className="text-xs text-hui-text-secondary mb-4">
+                    The slot number is the round in which you receive the full pot. Earlier slots pay out sooner.
+                  </p>
+                  <div className="grid grid-cols-5 gap-2">
+                    {circle.slots.map(slot => {
+                      const taken = slot.member !== null;
+                      const selected = selectedSlot === slot.index;
+                      return (
+                        <button
+                          key={slot.index}
+                          disabled={taken}
+                          onClick={() => setSelectedSlot(slot.index)}
+                          title={taken ? `Taken by ${slot.member?.displayName || slot.member?.wallet.slice(0, 6)}` : `Round ${slot.round}`}
+                          className={[
+                            'relative rounded-xl p-3 text-center border-2 transition-all duration-150',
+                            taken
+                              ? 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed'
+                              : selected
+                              ? 'bg-hui-primary border-hui-primary text-white shadow-lg scale-105'
+                              : 'bg-white border-hui-border text-hui-text hover:border-hui-primary hover:scale-105 cursor-pointer',
+                          ].join(' ')}
+                        >
+                          <div className="text-lg font-bold">{slot.round}</div>
+                          <div className="text-xs mt-0.5">{taken ? slot.member?.displayName || '●' : 'Open'}</div>
+                          {taken && (
+                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-hui-primary rounded-full flex items-center justify-center">
+                              <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedSlot !== null && (
+                    <p className="text-sm text-hui-primary font-medium mt-3">
+                      ✓ Slot {selectedSlot + 1} selected — you receive the pot in Round {selectedSlot + 1}
+                    </p>
+                  )}
+                </div>
+
+                {selectedSlot !== null && (
+                  <div className="card">
+                    <label className="block text-sm font-medium text-hui-text mb-1.5">Your Display Name</label>
+                    <input
+                      className="input w-full"
+                      placeholder="e.g. Lan, Uncle Minh…"
+                      value={displayName}
+                      onChange={e => setDisplayName(e.target.value.slice(0, 32))}
+                      maxLength={32}
+                    />
+                    <p className="text-xs text-hui-text-tertiary mt-1">Shown to other members on the dashboard.</p>
+                    {nameError && <p className="text-hui-error text-sm mt-1">{nameError}</p>}
+                    <button onClick={handleJoin} disabled={isLoading} className="btn-primary w-full mt-4">
+                      {isLoading ? 'Joining…' : `Join Slot ${selectedSlot + 1}`}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+export default function JoinPage() {
+  return (
+    <Suspense>
+      <JoinInner />
+    </Suspense>
   );
 }

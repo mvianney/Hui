@@ -169,7 +169,7 @@ export default function LandingPage() {
                     </div>
                     <div className="text-xs text-hui-text-tertiary flex justify-between">
                       <span>{circle.members.length} members</span>
-                      <span>Next: {circle.rounds.find(r => r.roundNumber === circle.currentRound)?.dueDate ? new Date(circle.rounds.find(r => r.roundNumber === circle.currentRound)!.dueDate).toLocaleDateString() : 'TBD'}</span>
+                      <span>Next: {circle.roundStartTs > 0 ? new Date((circle.roundStartTs + circle.frequencySeconds) * 1000).toLocaleDateString() : 'TBD'}</span>
                     </div>
                   </div>
                 </Link>

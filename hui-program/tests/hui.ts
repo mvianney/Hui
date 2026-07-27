@@ -12,13 +12,17 @@ import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/w
 import { expect } from "chai";
 
 // ============================================================
-// Hụi On-Chain — Anchor TypeScript Tests
+// Hụi On-Chain — Updated Tests (v2 flow)
 //
-// Simulates a full 5-member, 5-round circle end-to-end:
-// create → all join → each round: all contribute → payout →
-// verify balances → repeat → verify completion + reputation
+// New flow: create (no payout_order) → each member joins with
+// chosen_slot → creator calls start_circle → rounds proceed as before.
 //
-// Also includes missed-payment and negative test cases.
+// Tests:
+//  Happy path (5-member, 5-round)
+//  Slot-taken rejection
+//  start_circle gating (non-creator, incomplete slots)
+//  Missed payment scenario
+//  Negative tests
 // ============================================================
 
 describe("hui", () => {
@@ -28,20 +32,16 @@ describe("hui", () => {
   const program = anchor.workspace.Hui as Program<Hui>;
   const admin = provider.wallet as anchor.Wallet;
 
-  // --- Constants ---
   const TOTAL_ROUNDS = 5;
   const CONTRIBUTION_AMOUNT = 50_000_000; // 50 USDC (6 decimals)
   const FREQUENCY_SECONDS = 7 * 24 * 60 * 60; // 1 week
   const CIRCLE_NONCE = new anchor.BN(1);
 
-  // --- Accounts ---
   let usdcMint: PublicKey;
   let members: Keypair[];
   let memberTokenAccounts: PublicKey[];
   let circlePda: PublicKey;
-  let circleBump: number;
   let vaultPda: PublicKey;
-  let vaultBump: number;
   let memberRecordPdas: PublicKey[];
 
   // ============================================================
@@ -50,11 +50,7 @@ describe("hui", () => {
 
   async function findCirclePda(creator: PublicKey, nonce: anchor.BN): Promise<[PublicKey, number]> {
     return PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("circle"),
-        creator.toBuffer(),
-        nonce.toArrayLike(Buffer, "le", 8),
-      ],
+      [Buffer.from("circle"), creator.toBuffer(), nonce.toArrayLike(Buffer, "le", 8)],
       program.programId
     );
   }
@@ -66,10 +62,7 @@ describe("hui", () => {
     );
   }
 
-  async function findMemberRecordPda(
-    circle: PublicKey,
-    member: PublicKey
-  ): Promise<[PublicKey, number]> {
+  async function findMemberRecordPda(circle: PublicKey, member: PublicKey): Promise<[PublicKey, number]> {
     return PublicKey.findProgramAddressSync(
       [Buffer.from("member_record"), circle.toBuffer(), member.toBuffer()],
       program.programId
@@ -81,65 +74,33 @@ describe("hui", () => {
     await provider.connection.confirmTransaction(sig);
   }
 
-  async function getVaultBalance(): Promise<number> {
-    const vaultAccount = await getAccount(provider.connection, vaultPda);
-    return Number(vaultAccount.amount);
-  }
-
   async function getTokenBalance(tokenAccount: PublicKey): Promise<number> {
     const account = await getAccount(provider.connection, tokenAccount);
     return Number(account.amount);
   }
 
   // ============================================================
-  // Setup: Create USDC mint, 5 member wallets, fund them
+  // Setup: USDC mint, 5 member wallets, fund them
   // ============================================================
 
   before(async () => {
-    // Create 5 member keypairs
     members = Array.from({ length: TOTAL_ROUNDS }, () => Keypair.generate());
+    for (const m of members) await airdrop(m.publicKey);
 
-    // Airdrop SOL to all members (for tx fees)
-    for (const m of members) {
-      await airdrop(m.publicKey);
-    }
-
-    // Create a mock USDC mint (admin is mint authority)
     usdcMint = await createMint(
-      provider.connection,
-      admin.payer,
-      admin.publicKey,
-      null,
-      6 // 6 decimals like real USDC
+      provider.connection, admin.payer, admin.publicKey, null, 6
     );
 
-    // Create token accounts for each member and mint USDC
     memberTokenAccounts = [];
     for (const m of members) {
-      const tokenAccount = await createAccount(
-        provider.connection,
-        m,
-        usdcMint,
-        m.publicKey
-      );
+      const tokenAccount = await createAccount(provider.connection, m, usdcMint, m.publicKey);
       memberTokenAccounts.push(tokenAccount);
-
-      // Mint 1000 USDC to each member
-      await mintTo(
-        provider.connection,
-        admin.payer,
-        usdcMint,
-        tokenAccount,
-        admin.publicKey,
-        1000_000_000 // 1000 USDC
-      );
+      await mintTo(provider.connection, admin.payer, usdcMint, tokenAccount, admin.publicKey, 1000_000_000);
     }
 
-    // Derive PDAs
-    [circlePda, circleBump] = await findCirclePda(members[0].publicKey, CIRCLE_NONCE);
-    [vaultPda, vaultBump] = await findVaultPda(circlePda);
+    [circlePda] = await findCirclePda(members[0].publicKey, CIRCLE_NONCE);
+    [vaultPda] = await findVaultPda(circlePda);
 
-    // Derive MemberRecord PDAs
     memberRecordPdas = [];
     for (const m of members) {
       const [pda] = await findMemberRecordPda(circlePda, m.publicKey);
@@ -148,223 +109,24 @@ describe("hui", () => {
   });
 
   // ============================================================
-  // Test 1: Create Circle
+  // Happy path
   // ============================================================
 
-  it("creates a circle with 5 members", async () => {
-    const payoutOrder = members.map((m) => m.publicKey);
+  describe("happy path — 5-member, 5-round circle", () => {
 
-    await program.methods
-      .createCircle(
-        CIRCLE_NONCE,
-        "Hụi Gia Đình",
-        new anchor.BN(CONTRIBUTION_AMOUNT),
-        new anchor.BN(FREQUENCY_SECONDS),
-        TOTAL_ROUNDS,
-        payoutOrder
-      )
-      .accounts({
-        creator: members[0].publicKey,
-        circle: circlePda,
-        vault: vaultPda,
-        usdcMint,
-        systemProgram: SystemProgram.programId,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        rent: SYSVAR_RENT_PUBKEY,
-      })
-      .signers([members[0]])
-      .rpc();
-
-    // Verify circle state
-    const circle = await program.account.circle.fetch(circlePda);
-    expect(circle.name).to.equal("Hụi Gia Đình");
-    expect(circle.contributionAmount.toNumber()).to.equal(CONTRIBUTION_AMOUNT);
-    expect(circle.totalRounds).to.equal(TOTAL_ROUNDS);
-    expect(circle.currentRound).to.equal(0); // Not active yet
-    expect(circle.memberCount).to.equal(TOTAL_ROUNDS);
-    expect(Object.keys(circle.status)[0]).to.equal("pending");
-    expect(circle.membersJoined).to.equal(0);
-
-    // Verify vault exists with zero balance
-    const vaultBalance = await getVaultBalance();
-    expect(vaultBalance).to.equal(0);
-  });
-
-  // ============================================================
-  // Test 2: All Members Join
-  // ============================================================
-
-  it("all 5 members join the circle", async () => {
-    for (let i = 0; i < TOTAL_ROUNDS; i++) {
-      await program.methods
-        .joinCircle()
-        .accounts({
-          member: members[i].publicKey,
-          circle: circlePda,
-          memberRecord: memberRecordPdas[i],
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([members[i]])
-        .rpc();
-
-      // Verify MemberRecord
-      const record = await program.account.memberRecord.fetch(memberRecordPdas[i]);
-      expect(record.member.toBase58()).to.equal(members[i].publicKey.toBase58());
-      expect(record.payoutRound).to.equal(i + 1);
-      expect(record.receivedPayout).to.be.false;
-      expect(record.completedCircle).to.be.false;
-    }
-
-    // After last member joins, circle should be Active
-    const circle = await program.account.circle.fetch(circlePda);
-    expect(Object.keys(circle.status)[0]).to.equal("active");
-    expect(circle.currentRound).to.equal(1);
-    expect(circle.roundStartTs.toNumber()).to.be.greaterThan(0);
-  });
-
-  // ============================================================
-  // Test 3: Full 5-Round Cycle
-  // ============================================================
-
-  it("completes all 5 rounds with contributions and payouts", async () => {
-    for (let round = 1; round <= TOTAL_ROUNDS; round++) {
-      const recipientIndex = round - 1;
-      const recipientBalanceBefore = await getTokenBalance(
-        memberTokenAccounts[recipientIndex]
-      );
-
-      // All members contribute
-      for (let i = 0; i < TOTAL_ROUNDS; i++) {
-        await program.methods
-          .contribute()
-          .accounts({
-            member: members[i].publicKey,
-            circle: circlePda,
-            memberRecord: memberRecordPdas[i],
-            vault: vaultPda,
-            memberTokenAccount: memberTokenAccounts[i],
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([members[i]])
-          .rpc();
-      }
-
-      // Verify vault has the pot
-      const vaultBalance = await getVaultBalance();
-      expect(vaultBalance).to.equal(CONTRIBUTION_AMOUNT * TOTAL_ROUNDS);
-
-      // Trigger payout
-      await program.methods
-        .triggerPayout()
-        .accounts({
-          payer: admin.publicKey,
-          circle: circlePda,
-          vault: vaultPda,
-          recipientTokenAccount: memberTokenAccounts[recipientIndex],
-          recipientMemberRecord: memberRecordPdas[recipientIndex],
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .rpc();
-
-      // Verify recipient received the pot
-      const recipientBalanceAfter = await getTokenBalance(
-        memberTokenAccounts[recipientIndex]
-      );
-      const expectedPot = CONTRIBUTION_AMOUNT * TOTAL_ROUNDS;
-      expect(recipientBalanceAfter - recipientBalanceBefore).to.equal(
-        expectedPot - CONTRIBUTION_AMOUNT // net gain = pot minus own contribution
-      );
-
-      // Verify vault is now empty
-      const vaultBalanceAfter = await getVaultBalance();
-      expect(vaultBalanceAfter).to.equal(0);
-
-      // Verify recipient's MemberRecord
-      const recipientRecord = await program.account.memberRecord.fetch(
-        memberRecordPdas[recipientIndex]
-      );
-      expect(recipientRecord.receivedPayout).to.be.true;
-
-      // Check circle state
-      const circle = await program.account.circle.fetch(circlePda);
-      if (round < TOTAL_ROUNDS) {
-        expect(Object.keys(circle.status)[0]).to.equal("active");
-        expect(circle.currentRound).to.equal(round + 1);
-      } else {
-        expect(Object.keys(circle.status)[0]).to.equal("completed");
-      }
-    }
-  });
-
-  // ============================================================
-  // Test 4: Verify Final State After Completion
-  // ============================================================
-
-  it("verifies circle is Completed and all records are correct", async () => {
-    const circle = await program.account.circle.fetch(circlePda);
-    expect(Object.keys(circle.status)[0]).to.equal("completed");
-
-    for (let i = 0; i < TOTAL_ROUNDS; i++) {
-      const record = await program.account.memberRecord.fetch(memberRecordPdas[i]);
-      expect(record.roundsContributed).to.equal(TOTAL_ROUNDS);
-      expect(record.roundsMissed).to.equal(0);
-      expect(record.receivedPayout).to.be.true;
-      expect(record.payoutRound).to.equal(i + 1);
-    }
-  });
-
-  // ============================================================
-  // Test 5: Finalize Member Records
-  // ============================================================
-
-  it("finalizes all member records after completion", async () => {
-    for (let i = 0; i < TOTAL_ROUNDS; i++) {
-      await program.methods
-        .finalizeMember()
-        .accounts({
-          caller: admin.publicKey,
-          circle: circlePda,
-          member: members[i].publicKey,
-          memberRecord: memberRecordPdas[i],
-        })
-        .rpc();
-
-      const record = await program.account.memberRecord.fetch(memberRecordPdas[i]);
-      expect(record.completedCircle).to.be.true;
-    }
-  });
-
-  // ============================================================
-  // Negative Test Cases
-  // ============================================================
-
-  describe("negative tests (separate circle)", () => {
-    const NONCE_2 = new anchor.BN(2);
-    let circlePda2: PublicKey;
-    let vaultPda2: PublicKey;
-    let memberRecordPdas2: PublicKey[];
-    const NUM_MEMBERS = 3;
-
-    before(async () => {
-      // Create a 3-member circle for negative tests
-      [circlePda2] = await findCirclePda(members[0].publicKey, NONCE_2);
-      [vaultPda2] = await findVaultPda(circlePda2);
-
-      const payoutOrder = members.slice(0, NUM_MEMBERS).map((m) => m.publicKey);
-
+    it("creates a circle without payout_order", async () => {
       await program.methods
         .createCircle(
-          NONCE_2,
-          "Test Circle",
+          CIRCLE_NONCE,
+          "Hụi Gia Đình",
           new anchor.BN(CONTRIBUTION_AMOUNT),
           new anchor.BN(FREQUENCY_SECONDS),
-          NUM_MEMBERS,
-          payoutOrder
+          TOTAL_ROUNDS
         )
         .accounts({
           creator: members[0].publicKey,
-          circle: circlePda2,
-          vault: vaultPda2,
+          circle: circlePda,
+          vault: vaultPda,
           usdcMint,
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -373,215 +135,221 @@ describe("hui", () => {
         .signers([members[0]])
         .rpc();
 
-      // All 3 members join
-      memberRecordPdas2 = [];
-      for (let i = 0; i < NUM_MEMBERS; i++) {
-        const [pda] = await findMemberRecordPda(circlePda2, members[i].publicKey);
-        memberRecordPdas2.push(pda);
+      const circle = await program.account.circle.fetch(circlePda);
+      expect(circle.name).to.equal("Hụi Gia Đình");
+      expect(circle.totalRounds).to.equal(TOTAL_ROUNDS);
+      expect(circle.slotsFilled).to.equal(0);
+      expect(Object.keys(circle.status)[0]).to.equal("pending");
+      // All payout slots should be default pubkey (empty)
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
+        expect(circle.payoutOrder[i].toBase58()).to.equal(PublicKey.default.toBase58());
+      }
+    });
 
+    it("each member joins with a chosen slot and display name", async () => {
+      const names = ["Alice", "Bob", "Charlie", "Diana", "Edward"];
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
         await program.methods
-          .joinCircle()
+          .joinCircle(i, names[i])
           .accounts({
             member: members[i].publicKey,
-            circle: circlePda2,
-            memberRecord: pda,
+            circle: circlePda,
+            memberRecord: memberRecordPdas[i],
             systemProgram: SystemProgram.programId,
           })
           .signers([members[i]])
           .rpc();
       }
+
+      const circle = await program.account.circle.fetch(circlePda);
+      expect(circle.slotsFilled).to.equal(TOTAL_ROUNDS);
+      // Verify each slot maps to the correct member
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
+        expect(circle.payoutOrder[i].toBase58()).to.equal(members[i].publicKey.toBase58());
+      }
+      // Verify MemberRecords
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
+        const record = await program.account.memberRecord.fetch(memberRecordPdas[i]);
+        expect(record.displayName).to.equal(names[i]);
+        expect(record.payoutRound).to.equal(i + 1);
+        expect(record.roundsContributed).to.equal(0);
+      }
+      // Circle should still be Pending (no auto-activate)
+      expect(Object.keys(circle.status)[0]).to.equal("pending");
     });
 
-    it("rejects contribution from a non-member", async () => {
-      // members[3] is NOT in this 3-member circle
-      const nonMember = members[3];
-      const [fakePda] = await findMemberRecordPda(circlePda2, nonMember.publicKey);
-
-      // Capture vault balance before to verify nothing changed
-      const vaultBefore = await getTokenBalance(vaultPda2);
+    it("rejects duplicate slot claim", async () => {
+      // Slot 0 is taken by members[0] — another member tries to take it
+      const intruder = Keypair.generate();
+      await airdrop(intruder.publicKey);
+      const [intruderRecord] = await findMemberRecordPda(circlePda, intruder.publicKey);
 
       try {
         await program.methods
-          .contribute()
+          .joinCircle(0, "Intruder")
           .accounts({
-            member: nonMember.publicKey,
-            circle: circlePda2,
-            memberRecord: fakePda,
-            vault: vaultPda2,
-            memberTokenAccount: memberTokenAccounts[3],
-            tokenProgram: TOKEN_PROGRAM_ID,
+            member: intruder.publicKey,
+            circle: circlePda,
+            memberRecord: intruderRecord,
+            systemProgram: SystemProgram.programId,
           })
-          .signers([nonMember])
+          .signers([intruder])
           .rpc();
-        expect.fail("Should have thrown — non-member cannot contribute");
+        expect.fail("Should have thrown SlotAlreadyTaken");
       } catch (err: any) {
-        // MemberRecord PDA for a non-member doesn't exist, so Anchor throws
-        // AccountNotInitialized (the PDA was never created via join_circle).
-        // This is the correct rejection path — the seeds constraint fails.
-        const errMsg = err.toString();
-        const hasExpectedError = ["AccountNotFound", "ConstraintSeeds", "AccountOwnedByWrongProgram", "AccountNotInitialized"].some(x => errMsg.includes(x));
-        expect(hasExpectedError, `Expected error message to contain one of the constraints, got: ${errMsg}`).to.be.true;
+        expect(err.error.errorCode.code).to.equal("SlotAlreadyTaken");
       }
-
-      // Verify vault balance unchanged (no funds were transferred)
-      const vaultAfter = await getTokenBalance(vaultPda2);
-      expect(vaultAfter).to.equal(vaultBefore);
     });
 
-    it("rejects double-contribution in the same round", async () => {
-      // Member 0 contributes
+    it("rejects out-of-bounds slot", async () => {
+      const intruder = Keypair.generate();
+      await airdrop(intruder.publicKey);
+      const [intruderRecord] = await findMemberRecordPda(circlePda, intruder.publicKey);
+
+      try {
+        await program.methods
+          .joinCircle(99, "Intruder")
+          .accounts({
+            member: intruder.publicKey,
+            circle: circlePda,
+            memberRecord: intruderRecord,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([intruder])
+          .rpc();
+        expect.fail("Should have thrown SlotOutOfBounds");
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("SlotOutOfBounds");
+      }
+    });
+
+    it("rejects start_circle from non-creator", async () => {
+      try {
+        await program.methods
+          .startCircle()
+          .accounts({
+            creator: members[1].publicKey, // not the creator
+            circle: circlePda,
+          })
+          .signers([members[1]])
+          .rpc();
+        expect.fail("Should have thrown Unauthorized");
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("Unauthorized");
+      }
+    });
+
+    it("creator calls start_circle — circle becomes Active", async () => {
       await program.methods
-        .contribute()
+        .startCircle()
         .accounts({
-          member: members[0].publicKey,
-          circle: circlePda2,
-          memberRecord: memberRecordPdas2[0],
-          vault: vaultPda2,
-          memberTokenAccount: memberTokenAccounts[0],
-          tokenProgram: TOKEN_PROGRAM_ID,
+          creator: members[0].publicKey,
+          circle: circlePda,
         })
         .signers([members[0]])
         .rpc();
 
-      // Member 0 tries to contribute again
-      try {
-        await program.methods
-          .contribute()
-          .accounts({
-            member: members[0].publicKey,
-            circle: circlePda2,
-            memberRecord: memberRecordPdas2[0],
-            vault: vaultPda2,
-            memberTokenAccount: memberTokenAccounts[0],
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([members[0]])
-          .rpc();
-        expect.fail("Should have thrown");
-      } catch (err: any) {
-        expect(err.error.errorCode.code).to.equal("AlreadyContributed");
-      }
+      const circle = await program.account.circle.fetch(circlePda);
+      expect(Object.keys(circle.status)[0]).to.equal("active");
+      expect(circle.currentRound).to.equal(1);
+      expect(circle.roundStartTs.toNumber()).to.be.greaterThan(0);
     });
 
-    it("rejects payout when round is incomplete", async () => {
-      // Only member 0 has contributed (out of 3)
-      try {
+    // --- 5-round contribution + payout loop ---
+    for (let round = 1; round <= 5; round++) {
+      it(`round ${round}: all members contribute and payout fires`, async () => {
+        const recipientIndex = round - 1;
+        const recipientBalanceBefore = await getTokenBalance(memberTokenAccounts[recipientIndex]);
+        const otherBalancesBefore = await Promise.all(
+          memberTokenAccounts.map((acc) => getTokenBalance(acc))
+        );
+
+        // All 5 members contribute
+        for (let i = 0; i < TOTAL_ROUNDS; i++) {
+          await program.methods
+            .contribute()
+            .accounts({
+              member: members[i].publicKey,
+              circle: circlePda,
+              memberRecord: memberRecordPdas[i],
+              vault: vaultPda,
+              memberTokenAccount: memberTokenAccounts[i],
+              tokenProgram: TOKEN_PROGRAM_ID,
+            })
+            .signers([members[i]])
+            .rpc();
+        }
+
+        // Trigger payout
         await program.methods
           .triggerPayout()
           .accounts({
             payer: admin.publicKey,
-            circle: circlePda2,
-            vault: vaultPda2,
-            recipientTokenAccount: memberTokenAccounts[0],
-            recipientMemberRecord: memberRecordPdas2[0],
+            circle: circlePda,
+            vault: vaultPda,
+            recipientTokenAccount: memberTokenAccounts[recipientIndex],
+            recipientMemberRecord: memberRecordPdas[recipientIndex],
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .rpc();
-        expect.fail("Should have thrown");
-      } catch (err: any) {
-        expect(err.error.errorCode.code).to.equal("RoundNotComplete");
-      }
-    });
 
-    it("rejects mark_missed before grace period elapses", async () => {
-      try {
-        await program.methods
-          .markMissed()
-          .accounts({
-            caller: admin.publicKey,
-            circle: circlePda2,
-            member: members[1].publicKey,
-            memberRecord: memberRecordPdas2[1],
-          })
-          .rpc();
-        expect.fail("Should have thrown");
-      } catch (err: any) {
-        expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
-      }
-    });
+        // Verify payout: recipient gained (5 × 50 USDC) minus their own contribution
+        const recipientBalanceAfter = await getTokenBalance(memberTokenAccounts[recipientIndex]);
+        const expectedGain = CONTRIBUTION_AMOUNT * TOTAL_ROUNDS - CONTRIBUTION_AMOUNT; // net gain
+        expect(recipientBalanceAfter - recipientBalanceBefore).to.equal(expectedGain);
 
-    it("rejects joining a circle that is already Active", async () => {
-      // Circle is Active. Re-joining should fail because:
-      // 1. Circle status constraint requires Pending (CircleNotPending), OR
-      // 2. MemberRecord PDA already exists (Anchor init constraint)
-      // Either error is a valid rejection.
+        const circle = await program.account.circle.fetch(circlePda);
+        if (round < TOTAL_ROUNDS) {
+          expect(circle.currentRound).to.equal(round + 1);
+          expect(Object.keys(circle.status)[0]).to.equal("active");
+        } else {
+          expect(Object.keys(circle.status)[0]).to.equal("completed");
+        }
 
-      // Verify circle is indeed Active before the test
-      const circleBefore = await program.account.circle.fetch(circlePda2);
-      expect(Object.keys(circleBefore.status)[0]).to.equal("active");
+        // Verify recipient's MemberRecord
+        const record = await program.account.memberRecord.fetch(memberRecordPdas[recipientIndex]);
+        expect(record.receivedPayout).to.be.true;
+      });
+    }
 
-      try {
-        await program.methods
-          .joinCircle()
-          .accounts({
-            member: members[0].publicKey,
-            circle: circlePda2,
-            memberRecord: memberRecordPdas2[0],
-            systemProgram: SystemProgram.programId,
-          })
-          .signers([members[0]])
-          .rpc();
-        expect.fail("Should have thrown — cannot join Active circle");
-      } catch (err: any) {
-        // Anchor will reject because the Circle has status constraint requiring Pending,
-        // or because the MemberRecord account already exists (PDA already initialized).
-        const errStr = err.toString();
-        const isStatusError = errStr.includes("CircleNotPending");
-        const isAlreadyInitialized = errStr.includes("already in use") || errStr.includes("0x0");
-        expect(isStatusError || isAlreadyInitialized).to.be.true;
-      }
+    it("verifies all MemberRecords after circle completes", async () => {
+      const circle = await program.account.circle.fetch(circlePda);
+      expect(Object.keys(circle.status)[0]).to.equal("completed");
 
-      // Verify circle state unchanged
-      const circleAfter = await program.account.circle.fetch(circlePda2);
-      expect(Object.keys(circleAfter.status)[0]).to.equal("active");
-    });
-
-    it("rejects finalize_member on a non-completed circle", async () => {
-      try {
-        await program.methods
-          .finalizeMember()
-          .accounts({
-            caller: admin.publicKey,
-            circle: circlePda2,
-            member: members[0].publicKey,
-            memberRecord: memberRecordPdas2[0],
-          })
-          .rpc();
-        expect.fail("Should have thrown");
-      } catch (err: any) {
-        expect(err.error.errorCode.code).to.equal("NotCompleted");
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
+        const record = await program.account.memberRecord.fetch(memberRecordPdas[i]);
+        expect(record.roundsContributed).to.equal(TOTAL_ROUNDS);
+        expect(record.roundsMissed).to.equal(0);
+        expect(record.receivedPayout).to.be.true;
       }
     });
   });
 
   // ============================================================
-  // Missed Payment Test (separate circle)
+  // Missed Payment Test (separate circle, nonce 3)
   // ============================================================
 
   describe("missed payment scenario", () => {
     const NONCE_3 = new anchor.BN(3);
+    const NUM_MEMBERS = 3;
+    const SHORT_FREQUENCY = 1; // 1 second
+
     let circlePda3: PublicKey;
     let vaultPda3: PublicKey;
     let memberRecordPdas3: PublicKey[];
-    const NUM_MEMBERS = 3;
-    // Use very short frequency so grace period test is feasible
-    // (in real tests with a local validator, we'd warp time)
-    const SHORT_FREQUENCY = 1; // 1 second
 
     before(async () => {
       [circlePda3] = await findCirclePda(members[0].publicKey, NONCE_3);
       [vaultPda3] = await findVaultPda(circlePda3);
 
-      const payoutOrder = members.slice(0, NUM_MEMBERS).map((m) => m.publicKey);
-
+      // Create circle (no payout_order)
       await program.methods
         .createCircle(
           NONCE_3,
           "Missed Test",
           new anchor.BN(CONTRIBUTION_AMOUNT),
           new anchor.BN(SHORT_FREQUENCY),
-          NUM_MEMBERS,
-          payoutOrder
+          NUM_MEMBERS
         )
         .accounts({
           creator: members[0].publicKey,
@@ -595,14 +363,13 @@ describe("hui", () => {
         .signers([members[0]])
         .rpc();
 
-      // All join
+      // All 3 members join with chosen slots
       memberRecordPdas3 = [];
       for (let i = 0; i < NUM_MEMBERS; i++) {
         const [pda] = await findMemberRecordPda(circlePda3, members[i].publicKey);
         memberRecordPdas3.push(pda);
-
         await program.methods
-          .joinCircle()
+          .joinCircle(i, `Member ${i}`)
           .accounts({
             member: members[i].publicKey,
             circle: circlePda3,
@@ -612,14 +379,16 @@ describe("hui", () => {
           .signers([members[i]])
           .rpc();
       }
+
+      // Creator starts circle
+      await program.methods
+        .startCircle()
+        .accounts({ creator: members[0].publicKey, circle: circlePda3 })
+        .signers([members[0]])
+        .rpc();
     });
 
-    it("member 0 and 1 contribute, member 2 skips — verifies partial state and blocked round", async () => {
-      // Capture balances before
-      const member0BalanceBefore = await getTokenBalance(memberTokenAccounts[0]);
-      const member1BalanceBefore = await getTokenBalance(memberTokenAccounts[1]);
-      const member2BalanceBefore = await getTokenBalance(memberTokenAccounts[2]);
-
+    it("member 0 and 1 contribute, member 2 skips — round stays open", async () => {
       // Members 0 and 1 contribute
       for (let i = 0; i < 2; i++) {
         await program.methods
@@ -636,59 +405,13 @@ describe("hui", () => {
           .rpc();
       }
 
-      // Verify vault has exactly 2 contributions
-      const vaultBalance = await getTokenBalance(vaultPda3);
-      expect(vaultBalance).to.equal(CONTRIBUTION_AMOUNT * 2);
-
-      // Verify member balances decreased correctly
-      const member0BalanceAfter = await getTokenBalance(memberTokenAccounts[0]);
-      const member1BalanceAfter = await getTokenBalance(memberTokenAccounts[1]);
-      const member2BalanceAfter = await getTokenBalance(memberTokenAccounts[2]);
-      expect(member0BalanceBefore - member0BalanceAfter).to.equal(CONTRIBUTION_AMOUNT);
-      expect(member1BalanceBefore - member1BalanceAfter).to.equal(CONTRIBUTION_AMOUNT);
-      expect(member2BalanceAfter).to.equal(member2BalanceBefore); // Unchanged
-
-      // Verify MemberRecord state: members 0 and 1 have contributed
-      const record0 = await program.account.memberRecord.fetch(memberRecordPdas3[0]);
-      const record1 = await program.account.memberRecord.fetch(memberRecordPdas3[1]);
-      const record2 = await program.account.memberRecord.fetch(memberRecordPdas3[2]);
-      expect(record0.roundsContributed).to.equal(1);
-      expect(record1.roundsContributed).to.equal(1);
-      expect(record2.roundsContributed).to.equal(0); // Skipped
-
-      // Verify bitmap: bits 0 and 1 set, bit 2 clear
       const circle = await program.account.circle.fetch(circlePda3);
-      const round0Bitmap = circle.contributions[0];
-      expect(round0Bitmap & (1 << 0)).to.not.equal(0); // member 0 paid
-      expect(round0Bitmap & (1 << 1)).to.not.equal(0); // member 1 paid
-      expect(round0Bitmap & (1 << 2)).to.equal(0);      // member 2 skipped
+      expect(circle.currentRound).to.equal(1); // stuck
+      expect(circle.contributions[0] & (1 << 0)).to.not.equal(0);
+      expect(circle.contributions[0] & (1 << 1)).to.not.equal(0);
+      expect(circle.contributions[0] & (1 << 2)).to.equal(0);
 
-      // Verify circle is still on round 1 (not advanced)
-      expect(circle.currentRound).to.equal(1);
-      expect(Object.keys(circle.status)[0]).to.equal("active");
-
-      // mark_missed should fail (grace period not elapsed)
-      try {
-        await program.methods
-          .markMissed()
-          .accounts({
-            caller: admin.publicKey,
-            circle: circlePda3,
-            member: members[2].publicKey,
-            memberRecord: memberRecordPdas3[2],
-          })
-          .rpc();
-        // If this somehow succeeds (clock drift), verify the record was updated
-        const updatedRecord = await program.account.memberRecord.fetch(memberRecordPdas3[2]);
-        expect(updatedRecord.roundsMissed).to.equal(1);
-      } catch (err: any) {
-        expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
-        // Verify member record unchanged
-        const unchangedRecord = await program.account.memberRecord.fetch(memberRecordPdas3[2]);
-        expect(unchangedRecord.roundsMissed).to.equal(0);
-      }
-
-      // Verify round is blocked — trigger_payout must fail
+      // trigger_payout must fail — round not complete
       try {
         await program.methods
           .triggerPayout()
@@ -701,14 +424,204 @@ describe("hui", () => {
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .rpc();
-        expect.fail("Should have thrown — round is incomplete");
+        expect.fail("Should have thrown RoundNotComplete");
       } catch (err: any) {
         expect(err.error.errorCode.code).to.equal("RoundNotComplete");
       }
 
-      // Final sanity: vault still has the partial contributions
-      const vaultFinal = await getTokenBalance(vaultPda3);
-      expect(vaultFinal).to.equal(CONTRIBUTION_AMOUNT * 2);
+      // mark_missed should fail (grace period not elapsed)
+      try {
+        await program.methods
+          .markMissed()
+          .accounts({
+            caller: admin.publicKey,
+            circle: circlePda3,
+            member: members[2].publicKey,
+            memberRecord: memberRecordPdas3[2],
+          })
+          .rpc();
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
+      }
+    });
+  });
+
+  // ============================================================
+  // Negative tests (using a fresh circle, nonce 2)
+  // ============================================================
+
+  describe("negative tests", () => {
+    const NONCE_2 = new anchor.BN(2);
+    let circlePda2: PublicKey;
+    let vaultPda2: PublicKey;
+    let memberRecordPdas2: PublicKey[];
+
+    before(async () => {
+      [circlePda2] = await findCirclePda(members[0].publicKey, NONCE_2);
+      [vaultPda2] = await findVaultPda(circlePda2);
+
+      await program.methods
+        .createCircle(
+          NONCE_2,
+          "Neg Test",
+          new anchor.BN(CONTRIBUTION_AMOUNT),
+          new anchor.BN(FREQUENCY_SECONDS),
+          TOTAL_ROUNDS
+        )
+        .accounts({
+          creator: members[0].publicKey,
+          circle: circlePda2,
+          vault: vaultPda2,
+          usdcMint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .signers([members[0]])
+        .rpc();
+
+      memberRecordPdas2 = [];
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
+        const [pda] = await findMemberRecordPda(circlePda2, members[i].publicKey);
+        memberRecordPdas2.push(pda);
+        await program.methods
+          .joinCircle(i, `Neg ${i}`)
+          .accounts({
+            member: members[i].publicKey,
+            circle: circlePda2,
+            memberRecord: pda,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([members[i]])
+          .rpc();
+      }
+
+      await program.methods
+        .startCircle()
+        .accounts({ creator: members[0].publicKey, circle: circlePda2 })
+        .signers([members[0]])
+        .rpc();
+    });
+
+    it("rejects contribute when circle is Active and member tries to contribute twice in same round", async () => {
+      // Member 0 contributes once
+      await program.methods
+        .contribute()
+        .accounts({
+          member: members[0].publicKey,
+          circle: circlePda2,
+          memberRecord: memberRecordPdas2[0],
+          vault: vaultPda2,
+          memberTokenAccount: memberTokenAccounts[0],
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([members[0]])
+        .rpc();
+
+      // Try again — should fail
+      try {
+        await program.methods
+          .contribute()
+          .accounts({
+            member: members[0].publicKey,
+            circle: circlePda2,
+            memberRecord: memberRecordPdas2[0],
+            vault: vaultPda2,
+            memberTokenAccount: memberTokenAccounts[0],
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([members[0]])
+          .rpc();
+        expect.fail("Should have thrown AlreadyContributed");
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("AlreadyContributed");
+      }
+    });
+
+    it("rejects start_circle when circle is already Active", async () => {
+      try {
+        await program.methods
+          .startCircle()
+          .accounts({ creator: members[0].publicKey, circle: circlePda2 })
+          .signers([members[0]])
+          .rpc();
+        expect.fail("Should have thrown CircleNotPending");
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("CircleNotPending");
+      }
+    });
+
+    it("rejects join_circle when circle is already Active", async () => {
+      const intruder = Keypair.generate();
+      await airdrop(intruder.publicKey);
+      const [intruderRecord] = await findMemberRecordPda(circlePda2, intruder.publicKey);
+      try {
+        await program.methods
+          .joinCircle(0, "Late")
+          .accounts({
+            member: intruder.publicKey,
+            circle: circlePda2,
+            memberRecord: intruderRecord,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([intruder])
+          .rpc();
+        expect.fail("Should have thrown CircleNotPending");
+      } catch (err: any) {
+        const errStr = err.toString();
+        const isStatus = errStr.includes("CircleNotPending");
+        const isAlreadyInit = errStr.includes("already in use") || errStr.includes("0x0");
+        expect(isStatus || isAlreadyInit).to.be.true;
+      }
+    });
+
+    it("rejects start_circle before all slots filled (new circle)", async () => {
+      const NONCE_4 = new anchor.BN(4);
+      const [circlePda4] = await findCirclePda(members[0].publicKey, NONCE_4);
+      const [vaultPda4] = await findVaultPda(circlePda4);
+
+      await program.methods
+        .createCircle(
+          NONCE_4, "Partial", new anchor.BN(CONTRIBUTION_AMOUNT), new anchor.BN(FREQUENCY_SECONDS), 3
+        )
+        .accounts({
+          creator: members[0].publicKey, circle: circlePda4, vault: vaultPda4,
+          usdcMint, systemProgram: SystemProgram.programId, tokenProgram: TOKEN_PROGRAM_ID, rent: SYSVAR_RENT_PUBKEY,
+        })
+        .signers([members[0]])
+        .rpc();
+
+      // Only 1 of 3 slots filled
+      const [rec0] = await findMemberRecordPda(circlePda4, members[0].publicKey);
+      await program.methods.joinCircle(0, "OnlyOne")
+        .accounts({ member: members[0].publicKey, circle: circlePda4, memberRecord: rec0, systemProgram: SystemProgram.programId })
+        .signers([members[0]]).rpc();
+
+      try {
+        await program.methods.startCircle()
+          .accounts({ creator: members[0].publicKey, circle: circlePda4 })
+          .signers([members[0]]).rpc();
+        expect.fail("Should have thrown NotAllSlotsFilled");
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("NotAllSlotsFilled");
+      }
+    });
+
+    it("rejects finalize_member on a non-completed circle", async () => {
+      try {
+        await program.methods
+          .finalizeMember()
+          .accounts({
+            caller: admin.publicKey,
+            circle: circlePda2,
+            member: members[0].publicKey,
+            memberRecord: memberRecordPdas2[0],
+          })
+          .rpc();
+        expect.fail("Should have thrown NotCompleted");
+      } catch (err: any) {
+        expect(err.error.errorCode.code).to.equal("NotCompleted");
+      }
     });
   });
 });

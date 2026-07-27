@@ -1,91 +1,56 @@
 // ============================================================
-// Hụi On-Chain — Core Types
-// These mirror the future on-chain Anchor account structures.
-// When swapping mock → real, only the data-fetching layer changes;
-// these types stay the same.
+// Hụi On-Chain — Frontend Types (v2: slot-picker flow)
 // ============================================================
 
-export type CircleStatus = 'pending' | 'active' | 'completed';
-export type RoundStatus = 'upcoming' | 'open' | 'complete' | 'missed';
-export type ContributionStatus = 'pending' | 'paid' | 'missed';
 export type Frequency = 'weekly' | 'monthly';
 
-export interface Contribution {
-  memberWallet: string;
-  roundNumber: number;
-  status: ContributionStatus;
-  paidAt?: string; // ISO date string
+export type CircleStatus = 'pending' | 'active' | 'completed';
+
+/** One slot in the payout order. null = open/unclaimed. */
+export interface Slot {
+  index: number;          // 0-indexed position
+  round: number;          // 1-indexed payout round (index + 1)
+  member: Member | null;  // null if unclaimed
 }
 
 export interface Member {
-  walletAddress: string;
+  wallet: string;         // base58 pubkey
   displayName: string;
-  hasJoined: boolean;
-  contributionHistory: Contribution[];
-  hasReceivedPayout: boolean;
-  payoutRound?: number; // which round this member receives the pot
-}
-
-export interface Round {
-  roundNumber: number;
-  dueDate: string; // ISO date string
-  recipientWallet: string;
-  recipientName: string;
-  contributionsReceived: Contribution[];
-  status: RoundStatus;
+  slotIndex: number;      // 0-indexed
+  payoutRound: number;    // 1-indexed
+  roundsContributed: number;
+  roundsMissed: number;
+  receivedPayout: boolean;
 }
 
 export interface Circle {
-  id: string;
+  id: string;             // circle PDA base58
   name: string;
-  inviteCode: string;
-  contributionAmount: number; // in USDC
-  frequency: Frequency;
+  creator: string;        // creator wallet base58
+  contributionAmount: number;   // in USDC base units (6 decimals)
+  frequencySeconds: number;
   totalRounds: number;
   currentRound: number;
-  members: Member[];
-  payoutOrder: string[]; // wallet addresses in payout order
-  rounds: Round[];
+  slotsFilled: number;
   status: CircleStatus;
-  createdAt: string; // ISO date string
-  organizerWallet: string;
+  roundStartTs: number;
+  vaultBalance?: number;
+  slots: Slot[];          // length === totalRounds
+  members: Member[];      // only filled slots
+  inviteCode?: string;    // derived from circle PDA for sharing
 }
-
-// -----------------------------------------------------------
-// Form / Action types (for create, join, contribute flows)
-// -----------------------------------------------------------
 
 export interface CreateCircleInput {
   name: string;
   contributionAmount: number;
   frequency: Frequency;
-  totalRounds: number;
-  memberNames: string[]; // display names in payout order
+  totalMembers: number;
 }
-
-export interface JoinCircleInput {
-  inviteCode: string;
-  displayName: string;
-}
-
-export interface ContributeInput {
-  circleId: string;
-  roundNumber: number;
-}
-
-// -----------------------------------------------------------
-// Reputation / completion summary
-// -----------------------------------------------------------
 
 export interface MemberReputation {
-  walletAddress: string;
+  wallet: string;
   displayName: string;
-  circleName: string;
-  totalRounds: number;
-  roundsCompleted: number;
+  roundsContributed: number;
   roundsMissed: number;
-  payoutReceived: boolean;
-  payoutRound: number;
-  completionRate: number; // 0–100
-  completedAt: string; // ISO date string
+  receivedPayout: boolean;
 }

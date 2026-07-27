@@ -101,7 +101,8 @@
     {
       "name": "create_circle",
       "docs": [
-        "Create a new Hụi savings circle with a fixed payout order."
+        "Create a new Hụi savings circle.",
+        "payout_order is no longer an argument — members choose their own slots via join_circle."
       ],
       "discriminator": [
         186,
@@ -204,12 +205,6 @@
         {
           "name": "total_rounds",
           "type": "u8"
-        },
-        {
-          "name": "payout_order",
-          "type": {
-            "vec": "pubkey"
-          }
         }
       ]
     },
@@ -282,7 +277,8 @@
     {
       "name": "join_circle",
       "docs": [
-        "Member accepts their spot in the circle."
+        "Member joins the circle by claiming a specific slot (0-indexed).",
+        "chosen_slot determines which round they receive the payout."
       ],
       "discriminator": [
         231,
@@ -343,7 +339,16 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "chosen_slot",
+          "type": "u8"
+        },
+        {
+          "name": "display_name",
+          "type": "string"
+        }
+      ]
     },
     {
       "name": "mark_missed",
@@ -411,6 +416,35 @@
               }
             ]
           }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "start_circle",
+      "docs": [
+        "Creator explicitly activates the circle once all slots are filled.",
+        "Replaces the old auto-activate logic in join_circle."
+      ],
+      "discriminator": [
+        53,
+        52,
+        187,
+        212,
+        217,
+        132,
+        253,
+        102
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "circle",
+          "writable": true
         }
       ],
       "args": []
@@ -547,177 +581,161 @@
   "errors": [
     {
       "code": 6000,
-      "name": "InvalidPayoutOrder",
-      "msg": "Payout order length must equal total rounds"
+      "name": "NameTooLong",
+      "msg": "Circle name exceeds 32 bytes"
     },
     {
       "code": 6001,
-      "name": "DuplicateMember",
-      "msg": "Duplicate member in payout order"
-    },
-    {
-      "code": 6002,
-      "name": "NotAMember",
-      "msg": "Not a member of this circle"
-    },
-    {
-      "code": 6003,
-      "name": "AlreadyJoined",
-      "msg": "Member has already joined this circle"
-    },
-    {
-      "code": 6004,
-      "name": "CircleNotActive",
-      "msg": "Circle is not in Active status"
-    },
-    {
-      "code": 6005,
-      "name": "CircleNotPending",
-      "msg": "Circle is not in Pending status"
-    },
-    {
-      "code": 6006,
-      "name": "WrongRound",
-      "msg": "Wrong round number — does not match current round"
-    },
-    {
-      "code": 6007,
-      "name": "AlreadyContributed",
-      "msg": "Already contributed this round"
-    },
-    {
-      "code": 6008,
-      "name": "RoundNotComplete",
-      "msg": "Round is not yet complete — not all members have contributed"
-    },
-    {
-      "code": 6009,
-      "name": "CircleCompleted",
-      "msg": "Circle is already completed"
-    },
-    {
-      "code": 6010,
-      "name": "InvalidTotalRounds",
-      "msg": "Total rounds must be between 2 and 20"
-    },
-    {
-      "code": 6011,
       "name": "InvalidAmount",
       "msg": "Contribution amount must be greater than zero"
     },
     {
+      "code": 6002,
+      "name": "InvalidFrequency",
+      "msg": "Frequency must be greater than zero"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidTotalRounds",
+      "msg": "Total rounds must be between 2 and 20"
+    },
+    {
+      "code": 6004,
+      "name": "CircleNotPending",
+      "msg": "Circle is not in Pending status"
+    },
+    {
+      "code": 6005,
+      "name": "CircleNotActive",
+      "msg": "Circle is not in Active status"
+    },
+    {
+      "code": 6006,
+      "name": "NotCompleted",
+      "msg": "Circle is not completed"
+    },
+    {
+      "code": 6007,
+      "name": "AlreadyJoined",
+      "msg": "Member has already joined this circle"
+    },
+    {
+      "code": 6008,
+      "name": "NotAMember",
+      "msg": "Not a member of this circle"
+    },
+    {
+      "code": 6009,
+      "name": "AlreadyContributed",
+      "msg": "Member has already contributed this round"
+    },
+    {
+      "code": 6010,
+      "name": "AlreadyReceivedPayout",
+      "msg": "Member has already received their payout"
+    },
+    {
+      "code": 6011,
+      "name": "RoundNotComplete",
+      "msg": "Round is not yet complete — not all members have contributed"
+    },
+    {
       "code": 6012,
       "name": "InvalidRecipient",
-      "msg": "Invalid recipient token account"
+      "msg": "Invalid recipient for this round"
     },
     {
       "code": 6013,
       "name": "GracePeriodNotElapsed",
-      "msg": "Grace period has not yet elapsed — cannot mark as missed"
+      "msg": "Grace period has not elapsed yet"
     },
     {
       "code": 6014,
-      "name": "MemberAlreadyPaid",
-      "msg": "Member has already contributed this round — cannot mark as missed"
+      "name": "AlreadyMissed",
+      "msg": "Member has already been marked as missed this round"
     },
     {
       "code": 6015,
-      "name": "NameTooLong",
-      "msg": "Name too long — maximum 32 bytes"
+      "name": "MemberAlreadyPaid",
+      "msg": "Member has already paid this round"
     },
     {
       "code": 6016,
-      "name": "InvalidFrequency",
-      "msg": "Frequency must be a positive number of seconds"
-    },
-    {
-      "code": 6017,
       "name": "Overflow",
       "msg": "Arithmetic overflow"
     },
     {
+      "code": 6017,
+      "name": "SlotOutOfBounds",
+      "msg": "Chosen slot is out of bounds for this circle"
+    },
+    {
       "code": 6018,
-      "name": "AlreadyFinalized",
-      "msg": "Circle has already been fully completed"
+      "name": "SlotAlreadyTaken",
+      "msg": "That slot has already been taken by another member"
     },
     {
       "code": 6019,
-      "name": "NotCompleted",
-      "msg": "Circle is not yet completed — cannot finalize member record"
+      "name": "NotAllSlotsFilled",
+      "msg": "Not all slots are filled — cannot start circle yet"
+    },
+    {
+      "code": 6020,
+      "name": "Unauthorized",
+      "msg": "Only the circle creator can perform this action"
+    },
+    {
+      "code": 6021,
+      "name": "AlreadyFinalized",
+      "msg": "Member record has already been finalized"
     }
   ],
   "types": [
     {
       "name": "Circle",
       "docs": [
-        "Main Circle account — holds all circle configuration, membership, and",
-        "per-round contribution tracking via bitmaps.",
+        "Main Circle account.",
         "",
         "PDA seeds: [\"circle\", creator, circle_nonce.to_le_bytes()]",
         "",
-        "Design choice: contribution tracking uses a bitmap (`[u32; 20]`) rather",
-        "than separate PDA accounts per (circle, round, member). With a cap of 20",
-        "members, each u32 holds one round's contribution status (bit i = member i",
-        "has contributed). Total cost: 80 bytes vs 20×20 = 400 separate accounts.",
-        "Far cheaper, simpler, and faster to query."
+        "Key design change from v1: payout_order is no longer set at creation.",
+        "Instead each member picks their slot when calling join_circle. The slot",
+        "index determines their payout round. start_circle (creator-only) activates",
+        "the circle once all slots are filled."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "creator",
-            "docs": [
-              "The wallet that created this circle."
-            ],
             "type": "pubkey"
           },
           {
             "name": "name",
-            "docs": [
-              "Human-readable circle name (max 32 UTF-8 bytes)."
-            ],
             "type": "string"
           },
           {
             "name": "contribution_amount",
-            "docs": [
-              "Per-round contribution in USDC base units (6 decimals, e.g. 50_000_000 = 50 USDC)."
-            ],
             "type": "u64"
           },
           {
             "name": "frequency_seconds",
-            "docs": [
-              "Seconds between round deadlines."
-            ],
             "type": "i64"
           },
           {
             "name": "total_rounds",
-            "docs": [
-              "Total number of rounds (and members). Range: [2, 20]."
-            ],
             "type": "u8"
           },
           {
             "name": "current_round",
-            "docs": [
-              "Current active round number (1-indexed). 0 when Pending."
-            ],
             "type": "u8"
           },
           {
             "name": "member_count",
-            "docs": [
-              "Actual number of members in this circle (== total_rounds for MVP fixed-order)."
-            ],
             "type": "u8"
           },
           {
             "name": "status",
-            "docs": [
-              "Circle lifecycle status."
-            ],
             "type": {
               "defined": {
                 "name": "CircleStatus"
@@ -726,43 +744,31 @@
           },
           {
             "name": "round_start_ts",
-            "docs": [
-              "Unix timestamp when the current round opened."
-            ],
             "type": "i64"
           },
           {
             "name": "vault_bump",
-            "docs": [
-              "PDA bump for the vault token account."
-            ],
             "type": "u8"
           },
           {
             "name": "bump",
-            "docs": [
-              "PDA bump for this Circle account."
-            ],
             "type": "u8"
           },
           {
             "name": "circle_nonce",
-            "docs": [
-              "Unique nonce used in PDA derivation (allows creator to make multiple circles)."
-            ],
             "type": "u64"
           },
           {
-            "name": "members_joined",
+            "name": "slots_filled",
             "docs": [
-              "Bitmap: bit i is set when member i (by index in payout_order) has called join_circle."
+              "How many slots have been claimed so far via join_circle."
             ],
-            "type": "u32"
+            "type": "u8"
           },
           {
             "name": "contributions",
             "docs": [
-              "Per-round contribution bitmaps. contributions[r] bit i = member i contributed in round r+1."
+              "Per-round contribution bitmaps (bit i = member i contributed in round i+1)."
             ],
             "type": {
               "array": [
@@ -774,8 +780,9 @@
           {
             "name": "payout_order",
             "docs": [
-              "Ordered list of member pubkeys. payout_order[i] receives the pot in round i+1.",
-              "Unused slots (index >= member_count) are Pubkey::default()."
+              "Payout order built incrementally as members choose slots.",
+              "payout_order[i] is the wallet that will receive the pot in round i+1.",
+              "Pubkey::default() means slot i is still open."
             ],
             "type": {
               "array": [
@@ -807,9 +814,7 @@
     {
       "name": "MemberRecord",
       "docs": [
-        "Per-member, per-circle reputation record.",
-        "Tracks contribution history and payout status for the on-chain reputation feature.",
-        "",
+        "Per-member, per-circle record.",
         "PDA seeds: [\"member_record\", circle.key(), member.key()]"
       ],
       "type": {
@@ -817,58 +822,44 @@
         "fields": [
           {
             "name": "member",
-            "docs": [
-              "The member's wallet."
-            ],
             "type": "pubkey"
           },
           {
             "name": "circle",
-            "docs": [
-              "The circle this record belongs to."
-            ],
             "type": "pubkey"
           },
           {
-            "name": "rounds_contributed",
+            "name": "display_name",
             "docs": [
-              "Number of rounds this member successfully contributed."
+              "Display name chosen at join time (max 32 bytes)."
             ],
+            "type": "string"
+          },
+          {
+            "name": "rounds_contributed",
             "type": "u8"
           },
           {
             "name": "rounds_missed",
-            "docs": [
-              "Number of rounds this member was marked as missed."
-            ],
             "type": "u8"
           },
           {
             "name": "received_payout",
-            "docs": [
-              "Whether this member has received their payout."
-            ],
             "type": "bool"
           },
           {
             "name": "payout_round",
             "docs": [
-              "Which round this member is scheduled to receive the pot (1-indexed)."
+              "Which round this member receives the pot (1-indexed = slot + 1)."
             ],
             "type": "u8"
           },
           {
             "name": "completed_circle",
-            "docs": [
-              "Set to true when the circle reaches Completed status."
-            ],
             "type": "bool"
           },
           {
             "name": "bump",
-            "docs": [
-              "PDA bump."
-            ],
             "type": "u8"
           }
         ]

@@ -6,14 +6,14 @@ pub mod state;
 
 use instructions::*;
 
-// Placeholder program ID — update after `anchor keys list` or `anchor build`.
 declare_id!("BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB");
 
 #[program]
 pub mod hui {
     use super::*;
 
-    /// Create a new Hụi savings circle with a fixed payout order.
+    /// Create a new Hụi savings circle.
+    /// payout_order is no longer an argument — members choose their own slots via join_circle.
     pub fn create_circle(
         ctx: Context<CreateCircle>,
         circle_nonce: u64,
@@ -21,7 +21,6 @@ pub mod hui {
         contribution_amount: u64,
         frequency_seconds: i64,
         total_rounds: u8,
-        payout_order: Vec<Pubkey>,
     ) -> Result<()> {
         instructions::create_circle::handler(
             ctx,
@@ -30,13 +29,23 @@ pub mod hui {
             contribution_amount,
             frequency_seconds,
             total_rounds,
-            payout_order,
         )
     }
 
-    /// Member accepts their spot in the circle.
-    pub fn join_circle(ctx: Context<JoinCircle>) -> Result<()> {
-        instructions::join_circle::handler(ctx)
+    /// Member joins the circle by claiming a specific slot (0-indexed).
+    /// chosen_slot determines which round they receive the payout.
+    pub fn join_circle(
+        ctx: Context<JoinCircle>,
+        chosen_slot: u8,
+        display_name: String,
+    ) -> Result<()> {
+        instructions::join_circle::handler(ctx, chosen_slot, display_name)
+    }
+
+    /// Creator explicitly activates the circle once all slots are filled.
+    /// Replaces the old auto-activate logic in join_circle.
+    pub fn start_circle(ctx: Context<StartCircle>) -> Result<()> {
+        instructions::start_circle::handler(ctx)
     }
 
     /// Contribute USDC for the current round.

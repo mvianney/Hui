@@ -1,26 +1,20 @@
 use anchor_lang::prelude::*;
 
-/// Per-member, per-circle reputation record.
-/// Tracks contribution history and payout status for the on-chain reputation feature.
-///
+/// Per-member, per-circle record.
 /// PDA seeds: ["member_record", circle.key(), member.key()]
 #[account]
 #[derive(InitSpace)]
 pub struct MemberRecord {
-    /// The member's wallet.
     pub member: Pubkey,
-    /// The circle this record belongs to.
     pub circle: Pubkey,
-    /// Number of rounds this member successfully contributed.
+    /// Display name chosen at join time (max 32 bytes).
+    #[max_len(32)]
+    pub display_name: String,
     pub rounds_contributed: u8,
-    /// Number of rounds this member was marked as missed.
     pub rounds_missed: u8,
-    /// Whether this member has received their payout.
     pub received_payout: bool,
-    /// Which round this member is scheduled to receive the pot (1-indexed).
+    /// Which round this member receives the pot (1-indexed = slot + 1).
     pub payout_round: u8,
-    /// Set to true when the circle reaches Completed status.
     pub completed_circle: bool,
-    /// PDA bump.
     pub bump: u8,
 }
