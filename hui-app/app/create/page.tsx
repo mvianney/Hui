@@ -15,6 +15,8 @@ export default function CreatePage() {
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<Frequency>('monthly');
   const [totalMembers, setTotalMembers] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [result, setResult] = useState<{ circleId: string; inviteCode: string } | null>(null);
 
@@ -40,8 +42,17 @@ export default function CreatePage() {
     if (!name.trim()) { setError('Circle name is required'); return; }
     if (isNaN(amtNum) || amtNum <= 0) { setError('Contribution amount must be > 0'); return; }
     if (isNaN(membersNum) || membersNum < 2 || membersNum > 20) { setError('Members must be between 2 and 20'); return; }
+    if (selectedSlot === null) { setError('Please pick your payout slot'); return; }
+    if (!displayName.trim()) { setError('Your display name is required'); return; }
 
-    const res = await createCircle({ name: name.trim(), contributionAmount: amtNum, frequency, totalMembers: membersNum });
+    const res = await createCircle({
+      name: name.trim(),
+      contributionAmount: amtNum,
+      frequency,
+      totalMembers: membersNum,
+      creatorChosenSlot: selectedSlot,
+      creatorDisplayName: displayName.trim(),
+    });
     if (res) {
       setResult({ circleId: res.circle.id, inviteCode: res.inviteCode });
     }
@@ -58,7 +69,7 @@ export default function CreatePage() {
           <div className="text-5xl mb-4">🎉</div>
           <h1 className="text-2xl font-bold text-hui-text mb-2">Circle Created!</h1>
           <p className="text-hui-text-secondary mb-6 text-sm">
-            Share the invite code so members can join and pick their payout slot.
+            Share the invite code so other members can join the remaining open slots.
           </p>
 
           <div className="bg-hui-primary-light rounded-xl p-4 mb-4">
@@ -81,7 +92,7 @@ export default function CreatePage() {
               onClick={() => router.push(`/circle/${result.circleId}`)}
               className="btn-primary flex-1"
             >
-              Go to Circle →
+              Go to Dashboard →
             </button>
           </div>
         </div>
@@ -89,12 +100,15 @@ export default function CreatePage() {
     );
   }
 
+  const membersNum = parseInt(totalMembers) || 0;
+  const isMembersValid = membersNum >= 2 && membersNum <= 20;
+
   return (
     <div className="min-h-screen bg-hui-bg px-4 py-12">
       <div className="max-w-lg mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-hui-text mb-2">Create a Circle</h1>
-          <p className="text-hui-text-secondary">Set the terms. Members will choose their own payout slots when they join.</p>
+          <p className="text-hui-text-secondary">Set the terms, select your own slot, and invite others to join.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="card space-y-5">
@@ -150,22 +164,66 @@ export default function CreatePage() {
               max="20"
               placeholder="5"
               value={totalMembers}
-              onChange={e => setTotalMembers(e.target.value)}
+              onChange={e => {
+                setTotalMembers(e.target.value);
+                setSelectedSlot(null); // Reset selected slot when rounds change
+              }}
             />
-            <p className="text-xs text-hui-text-tertiary mt-1">
-              Each member picks their own payout slot after joining. You can also join after creating.
-            </p>
           </div>
 
+          {/* Creator's Display Name & Slot Picker (Only visible if rounds input is valid) */}
+          {isMembersValid && (
+            <div className="pt-4 border-t border-hui-border space-y-5 animate-slideUp">
+              <div>
+                <label className="block text-sm font-medium text-hui-text mb-1.5">Your Display Name</label>
+                <input
+                  className="input w-full"
+                  placeholder="e.g. Lan (Creator), Uncle Minh…"
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value.slice(0, 32))}
+                  maxLength={32}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-hui-text mb-1.5">Pick Your Payout Slot</label>
+                <p className="text-xs text-hui-text-secondary mb-3">
+                  Select the round you would like to receive the total pot.
+                </p>
+                <div className="grid grid-cols-5 gap-2">
+                  {Array.from({ length: membersNum }).map((_, idx) => {
+                    const selected = selectedSlot === idx;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setSelectedSlot(idx)}
+                        className={[
+                          'rounded-xl p-3 text-center border-2 transition-all duration-150',
+                          selected
+                            ? 'bg-hui-primary border-hui-primary text-white shadow-lg scale-105'
+                            : 'bg-white border-hui-border text-hui-text hover:border-hui-primary hover:scale-105 cursor-pointer',
+                        ].join(' ')}
+                      >
+                        <div className="text-lg font-bold">{idx + 1}</div>
+                        <div className="text-xs mt-0.5">{selected ? 'Mine' : 'Open'}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Summary */}
-          {amount && totalMembers && !isNaN(parseFloat(amount)) && !isNaN(parseInt(totalMembers)) && (
+          {amount && totalMembers && !isNaN(parseFloat(amount)) && isMembersValid && (
             <div className="bg-hui-primary-light rounded-xl p-4 text-sm">
               <p className="font-medium text-hui-primary mb-1">Circle Summary</p>
               <p className="text-hui-text-secondary">
-                {parseInt(totalMembers)} members × ${parseFloat(amount).toFixed(0)} USDC = <strong className="text-hui-text">${(parseInt(totalMembers) * parseFloat(amount)).toFixed(0)} pot</strong> each round
+                {membersNum} members × ${parseFloat(amount).toFixed(0)} USDC = <strong className="text-hui-text">${(membersNum * parseFloat(amount)).toFixed(0)} pot</strong> each round
               </p>
               <p className="text-hui-text-secondary mt-1">
-                Duration: ~{parseInt(totalMembers)} {frequency === 'weekly' ? 'weeks' : 'months'}
+                Duration: ~{membersNum} {frequency === 'weekly' ? 'weeks' : 'months'}
               </p>
             </div>
           )}

@@ -45,6 +45,8 @@ export interface CreateCircleInput {
   contributionAmount: number;
   frequency: Frequency;
   totalMembers: number;
+  creatorChosenSlot: number;
+  creatorDisplayName: string;
 }
 
 export interface MemberReputation {

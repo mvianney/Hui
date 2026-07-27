@@ -224,6 +224,7 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
       const nonce = new BN(nonceRef.current++);
       const [circlePda] = findCirclePda(wallet.publicKey, nonce);
       const [vaultPda] = findVaultPda(circlePda);
+      const [memberRecordPda] = findMemberRecordPda(circlePda, wallet.publicKey);
 
       const usdcMintStr = process.env.NEXT_PUBLIC_USDC_MINT;
       if (!usdcMintStr) throw new Error('NEXT_PUBLIC_USDC_MINT not set');
@@ -232,7 +233,8 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
       const frequencySeconds = input.frequency === 'weekly' ? 7 * 24 * 3600 : 30 * 24 * 3600;
       const contributionAmount = new BN(input.contributionAmount * 1_000_000);
 
-      await (program.methods as any)
+      // Construct create instruction
+      const createIx = await (program.methods as any)
         .createCircle(
           nonce,
           input.name,
@@ -249,7 +251,22 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
           tokenProgram: TOKEN_PROGRAM_ID,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .rpc();
+        .instruction();
+
+      // Construct join instruction for the creator
+      const joinIx = await (program.methods as any)
+        .joinCircle(input.creatorChosenSlot, input.creatorDisplayName)
+        .accounts({
+          member: wallet.publicKey,
+          circle: circlePda,
+          memberRecord: memberRecordPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+
+      // Bundle both instructions in a single transaction
+      const tx = new web3.Transaction().add(createIx, joinIx);
+      await (program.provider as AnchorProvider).sendAndConfirm(tx);
 
       const raw = await (program.account as any).circle.fetch(circlePda);
       const circle = circleFromOnChain(circlePda, raw);
