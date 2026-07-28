@@ -41,6 +41,7 @@ interface HuiContextValue {
   joinCircle: (circleId: string, chosenSlot: number, displayName: string) => Promise<boolean>;
   startCircle: (circleId: string) => Promise<boolean>;
   contribute: (circleId: string) => Promise<boolean>;
+  triggerPayout: (circleId: string) => Promise<boolean>;
   getMemberReputation: (circle: Circle, wallet: string) => MemberReputation | null;
 }
 
@@ -437,10 +438,110 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
         .rpc();
 
       addToast('Contribution sent!', 'success');
+
+      // Auto-trigger payout if all contributions are now complete
+      try {
+        const circleData = await (program.account as any).circle.fetch(circlePda);
+        const totalRounds = circleData.totalRounds;
+        const currentRound = circleData.currentRound;
+        const roundIndex = currentRound - 1;
+        const expectedMask = (1 << totalRounds) - 1;
+        const currentMask = circleData.contributions[roundIndex] || 0;
+
+        if ((currentMask & expectedMask) === expectedMask) {
+          addToast('All contributions in. Automatically releasing payout...', 'info');
+          const recipientPubkey = circleData.payoutOrder[roundIndex] as PublicKey;
+          const [recipientMemberRecordPda] = findMemberRecordPda(circlePda, recipientPubkey);
+          const recipientAta = await getAssociatedTokenAddress(mint, recipientPubkey);
+
+          // Ensure recipient ATA exists
+          try {
+            await getAccount(connection, recipientAta);
+          } catch {
+            const tx = new web3.Transaction().add(
+              createAssociatedTokenAccountInstruction(wallet.publicKey, recipientAta, recipientPubkey, mint)
+            );
+            await (program.provider as AnchorProvider).sendAndConfirm(tx);
+          }
+
+          await (program.methods as any)
+            .triggerPayout()
+            .accounts({
+              payer: wallet.publicKey,
+              circle: circlePda,
+              vault: vaultPda,
+              recipientTokenAccount: recipientAta,
+              recipientMemberRecord: recipientMemberRecordPda,
+              tokenProgram: TOKEN_PROGRAM_ID,
+            })
+            .rpc();
+
+          addToast('Payout released successfully to the recipient!', 'success');
+        }
+      } catch (payoutError) {
+        console.error('Auto-payout error fallback:', payoutError);
+        // Do not throw: the contribution succeeded even if auto-payout failed (user can use manual button)
+      }
+
       return true;
     } catch (e: any) {
       console.error('contribute', e);
       addToast(e.message ?? 'Failed to contribute', 'error');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.publicKey, connection, addToast]);
+
+  // ── triggerPayout ────────────────────────────────────────────
+  const triggerPayout = useCallback(async (circleId: string): Promise<boolean> => {
+    if (!wallet.publicKey) { addToast('Connect your wallet first', 'error'); return false; }
+    const program = getProgram();
+    if (!program) return false;
+
+    setIsLoading(true);
+    try {
+      const circlePda = new PublicKey(circleId);
+      const circleData = await (program.account as any).circle.fetch(circlePda);
+      const currentRound = circleData.currentRound;
+      const recipientPubkey = circleData.payoutOrder[currentRound - 1] as PublicKey;
+
+      const [vaultPda] = findVaultPda(circlePda);
+      const [recipientMemberRecordPda] = findMemberRecordPda(circlePda, recipientPubkey);
+
+      const vaultAccount = await getAccount(connection, vaultPda);
+      const mint = vaultAccount.mint;
+
+      const recipientAta = await getAssociatedTokenAddress(mint, recipientPubkey);
+
+      // Pre-create recipient ATA if it does not exist
+      try {
+        await getAccount(connection, recipientAta);
+      } catch {
+        const tx = new web3.Transaction().add(
+          createAssociatedTokenAccountInstruction(wallet.publicKey, recipientAta, recipientPubkey, mint)
+        );
+        await (program.provider as AnchorProvider).sendAndConfirm(tx);
+      }
+
+      await (program.methods as any)
+        .triggerPayout()
+        .accounts({
+          payer: wallet.publicKey,
+          circle: circlePda,
+          vault: vaultPda,
+          recipientTokenAccount: recipientAta,
+          recipientMemberRecord: recipientMemberRecordPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      addToast('Payout released successfully to the recipient!', 'success');
+      return true;
+    } catch (e: any) {
+      console.error('triggerPayout', e);
+      addToast(e.message ?? 'Failed to trigger payout', 'error');
       return false;
     } finally {
       setIsLoading(false);
@@ -466,7 +567,7 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
       circles, currentCircle, isLoading, toasts,
       addToast, removeToast,
       loadCircles, loadCircle, lookupInviteCode,
-      createCircle, joinCircle, startCircle, contribute,
+      createCircle, joinCircle, startCircle, contribute, triggerPayout,
       getMemberReputation,
     }}>
       {children}

@@ -138,7 +138,21 @@ function JoinInner() {
 
                   <div className="flex gap-4 text-sm text-hui-text-secondary flex-wrap mt-4 border-t border-hui-border/50 pt-4">
                     <span>${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC / round</span>
-                    <span>{circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'}</span>
+                     <span>
+                      {circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'}{' '}
+                      {circle.status === 'active' && circle.roundStartTs > 0 ? (
+                        <span>
+                          (Due:{' '}
+                          {new Date((circle.roundStartTs + circle.frequencySeconds) * 1000).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                          )
+                        </span>
+                      ) : (
+                        <span>(Due: TBD)</span>
+                      )}
+                    </span>
                     <span>{circle.slotsFilled} / {circle.totalRounds} members</span>
                     <span className={`badge ${circle.slotsFilled < circle.totalRounds ? 'badge-info' : 'badge-success'}`}>
                       {circle.totalRounds - circle.slotsFilled} open

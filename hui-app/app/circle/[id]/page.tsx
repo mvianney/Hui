@@ -21,7 +21,7 @@ export default function CircleDashboard() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { publicKey } = useWallet();
-  const { loadCircle, startCircle, contribute, isLoading } = useHui();
+  const { loadCircle, startCircle, contribute, triggerPayout, isLoading } = useHui();
 
   const [circle, setCircle] = useState<Circle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,9 +71,17 @@ export default function CircleDashboard() {
     ? (circle.contributions[circle.currentRound - 1] & (1 << mySlotIndex)) !== 0
     : false;
 
+  const roundIndex = circle.status === 'active' ? circle.currentRound - 1 : 0;
+  const expectedMask = (1 << circle.totalRounds) - 1;
+  const currentMask = circle.contributions && circle.contributions[roundIndex] !== undefined
+    ? circle.contributions[roundIndex]
+    : 0;
+  const isRoundFullyPaid = circle.status === 'active' && (currentMask & expectedMask) === expectedMask;
+
   const currentRecipient = circle.status === 'active'
     ? circle.slots[circle.currentRound - 1]?.member
     : null;
+  const recipientName = currentRecipient?.displayName || (currentRecipient ? truncate(currentRecipient.wallet) : 'Recipient');
 
   async function handleStart() {
     const ok = await startCircle(circle!.id);
@@ -82,6 +90,11 @@ export default function CircleDashboard() {
 
   async function handleContribute() {
     const ok = await contribute(circle!.id);
+    if (ok) await refresh();
+  }
+
+  async function handleReleasePayout() {
+    const ok = await triggerPayout(circle!.id);
     if (ok) await refresh();
   }
 
@@ -99,7 +112,19 @@ export default function CircleDashboard() {
               </div>
               <p className="text-sm text-hui-text-secondary">
                 ${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC per round ·{' '}
-                {circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'} ·{' '}
+                {circle.frequencySeconds === 604800 ? 'Weekly' : 'Monthly'}{' '}
+                {circle.status === 'active' && circle.roundStartTs > 0 ? (
+                  <span>
+                    (Due:{' '}
+                    {new Date((circle.roundStartTs + circle.frequencySeconds) * 1000).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                    )
+                  </span>
+                ) : (
+                  <span>(Due: TBD)</span>
+                )} ·{' '}
                 {circle.totalRounds} members
               </p>
             </div>
@@ -252,29 +277,49 @@ export default function CircleDashboard() {
 
         {/* Active actions */}
         {circle.status === 'active' && myMember && (
-          <div className="card">
-            <h3 className="font-semibold text-hui-text mb-1">Round {circle.currentRound} Contribution</h3>
-            <p className="text-sm text-hui-text-secondary mb-4">
-              {hasPaidCurrentRound 
-                ? 'Your contribution for this round has been successfully recorded on-chain.'
-                : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC to the vault.`}
-            </p>
-            <button
-              onClick={handleContribute}
-              disabled={isLoading || hasPaidCurrentRound}
-              className={[
-                'btn-primary w-full transition-all duration-200',
-                hasPaidCurrentRound 
-                  ? 'bg-stone-100 hover:bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-80'
-                  : ''
-              ].join(' ')}
-            >
-              {isLoading 
-                ? 'Sending…' 
-                : hasPaidCurrentRound 
-                ? '✓ Contributed — waiting for others' 
-                : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC`}
-            </button>
+          <div className="space-y-4">
+            {/* Contribution Box */}
+            <div className="card">
+              <h3 className="font-semibold text-hui-text mb-1">Round {circle.currentRound} Contribution</h3>
+              <p className="text-sm text-hui-text-secondary mb-4">
+                {hasPaidCurrentRound 
+                  ? 'Your contribution for this round has been successfully recorded on-chain.'
+                  : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC to the vault.`}
+              </p>
+              <button
+                onClick={handleContribute}
+                disabled={isLoading || hasPaidCurrentRound}
+                className={[
+                  'btn-primary w-full transition-all duration-200',
+                  hasPaidCurrentRound 
+                    ? 'bg-stone-100 hover:bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-80'
+                    : ''
+                ].join(' ')}
+              >
+                {isLoading 
+                  ? 'Sending…' 
+                  : hasPaidCurrentRound 
+                  ? '✓ Contributed — waiting for others' 
+                  : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC`}
+              </button>
+            </div>
+
+            {/* Safety Fallback Payout Button */}
+            {isRoundFullyPaid && (
+              <div className="card bg-hui-warning-light border border-hui-warning/30">
+                <h3 className="font-semibold text-hui-text mb-1 text-hui-warning">Payout Fallback Required</h3>
+                <p className="text-sm text-hui-text-secondary mb-4">
+                  All members have paid, but the automated payout transaction failed or didn&apos;t trigger. Use this button to manually release the pot to <strong>{recipientName}</strong>.
+                </p>
+                <button
+                  onClick={handleReleasePayout}
+                  disabled={isLoading}
+                  className="btn-primary w-full bg-hui-warning hover:bg-amber-600 border-none"
+                >
+                  {isLoading ? 'Processing…' : `Release Pot to ${recipientName}`}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
