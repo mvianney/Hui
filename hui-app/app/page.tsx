@@ -164,7 +164,7 @@ export default function LandingPage() {
                       </div>
                       <div className="text-hui-text-secondary text-right">
                         <span className="block mb-1">Contribution</span>
-                        <span className="font-semibold text-hui-text">{circle.contributionAmount} USDC</span>
+                        <span className="font-semibold text-hui-text">{(circle.contributionAmount / 1_000_000).toFixed(0)} USDC</span>
                       </div>
                     </div>
                     
