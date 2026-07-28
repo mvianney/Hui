@@ -305,7 +305,7 @@ export default function CircleDashboard() {
             </div>
 
             {/* Safety Fallback Payout Button */}
-            {isRoundFullyPaid && (
+            {isRoundFullyPaid && isCreator && (
               <div className="card bg-hui-warning-light border border-hui-warning/30">
                 <h3 className="font-semibold text-hui-text mb-1 text-hui-warning">Payout Fallback Required</h3>
                 <p className="text-sm text-hui-text-secondary mb-4">
