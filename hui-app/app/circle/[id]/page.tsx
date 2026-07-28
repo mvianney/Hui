@@ -25,6 +25,7 @@ export default function CircleDashboard() {
 
   const [circle, setCircle] = useState<Circle | null>(null);
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
 
   const refresh = useCallback(async () => {
     const c = await loadCircle(id);
@@ -33,6 +34,15 @@ export default function CircleDashboard() {
   }, [id, loadCircle]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Tick the countdown clock
+  useEffect(() => {
+    if (!circle || circle.status !== 'active') return;
+    const interval = setInterval(() => {
+      setNow(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [circle]);
 
   // Poll for state updates while pending (members joining)
   useEffect(() => {
@@ -83,6 +93,28 @@ export default function CircleDashboard() {
     : null;
   const recipientName = currentRecipient?.displayName || (currentRecipient ? truncate(currentRecipient.wallet) : 'Recipient');
 
+  // Timeline splits
+  const totalCycle = circle.frequencySeconds;
+  const windowSeconds = Math.floor(totalCycle * 5 / 7);
+  const contributionDeadlineTs = circle.roundStartTs + windowSeconds;
+  const secondsRemaining = contributionDeadlineTs - now;
+  const isOverdue = secondsRemaining < 0;
+
+  function formatCountdown(sec: number) {
+    if (sec <= 0) return 'Payment window closed (Overdue)';
+    const days = Math.floor(sec / (24 * 3600));
+    const hours = Math.floor((sec % (24 * 3600)) / 3600);
+    const minutes = Math.floor((sec % 3600) / 60);
+    const seconds = sec % 60;
+    
+    const segments = [];
+    if (days > 0) segments.push(`${days}d`);
+    if (hours > 0 || days > 0) segments.push(`${hours}h`);
+    if (minutes > 0 || hours > 0 || days > 0) segments.push(`${minutes}m`);
+    segments.push(`${seconds}s`);
+    return segments.join(' ') + ' remaining';
+  }
+
   async function handleStart() {
     const ok = await startCircle(circle!.id);
     if (ok) await refresh();
@@ -116,7 +148,7 @@ export default function CircleDashboard() {
                 {circle.status === 'active' && circle.roundStartTs > 0 ? (
                   <span>
                     (Due:{' '}
-                    {new Date((circle.roundStartTs + circle.frequencySeconds) * 1000).toLocaleDateString(undefined, {
+                    {new Date(contributionDeadlineTs * 1000).toLocaleDateString(undefined, {
                       month: 'short',
                       day: 'numeric',
                     })}
@@ -280,10 +312,19 @@ export default function CircleDashboard() {
           <div className="space-y-4">
             {/* Contribution Box */}
             <div className="card">
-              <h3 className="font-semibold text-hui-text mb-1">Round {circle.currentRound} Contribution</h3>
+              <div className="flex justify-between items-start mb-2">
+                <h3 className="font-semibold text-hui-text">Round {circle.currentRound} Contribution</h3>
+                {circle.status === 'active' && !hasPaidCurrentRound && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isOverdue ? 'bg-hui-error-light text-hui-error' : 'bg-hui-primary-light text-hui-primary'}`}>
+                    {isOverdue ? 'Overdue' : formatCountdown(secondsRemaining)}
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-hui-text-secondary mb-4">
                 {hasPaidCurrentRound 
                   ? 'Your contribution for this round has been successfully recorded on-chain.'
+                  : isOverdue
+                  ? `Payment window is closed, but you can still submit your $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC contribution late.`
                   : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC to the vault.`}
               </p>
               <button
