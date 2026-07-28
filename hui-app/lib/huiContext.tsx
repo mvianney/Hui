@@ -106,6 +106,7 @@ function circleFromOnChain(pda: PublicKey, raw: any): Circle {
     roundStartTs: raw.roundStartTs.toNumber(),
     slots,
     members: slots.filter(s => s.member !== null).map(s => s.member!),
+    contributions: raw.contributions as number[],
     inviteCode: pda.toBase58().slice(0, 8).toUpperCase(),
   };
 }

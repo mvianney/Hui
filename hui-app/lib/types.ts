@@ -37,6 +37,7 @@ export interface Circle {
   vaultBalance?: number;
   slots: Slot[];          // length === totalRounds
   members: Member[];      // only filled slots
+  contributions: number[]; // per-round contribution bitmaps (index: round - 1)
   inviteCode?: string;    // derived from circle PDA for sharing
 }
 

@@ -65,6 +65,12 @@ export default function CircleDashboard() {
   const slotsOpen = circle.totalRounds - circle.slotsFilled;
   const potAmount = (circle.contributionAmount * circle.totalRounds / 1_000_000).toFixed(0);
   const myMember = circle.members.find(m => m.wallet === publicKey);
+  const mySlotIndex = circle.slots.find(s => s.member?.wallet === publicKey)?.index;
+  
+  const hasPaidCurrentRound = circle.status === 'active' && mySlotIndex !== undefined
+    ? (circle.contributions[circle.currentRound - 1] & (1 << mySlotIndex)) !== 0
+    : false;
+
   const currentRecipient = circle.status === 'active'
     ? circle.slots[circle.currentRound - 1]?.member
     : null;
@@ -97,9 +103,17 @@ export default function CircleDashboard() {
                 {circle.totalRounds} members
               </p>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-hui-text-tertiary mb-0.5">Pot per round</p>
-              <p className="text-2xl font-bold text-hui-primary">${potAmount}</p>
+            <div className="flex gap-6">
+              {circle.vaultBalance !== undefined && circle.vaultBalance > 0 && (
+                <div className="text-right">
+                  <p className="text-xs text-hui-text-tertiary mb-0.5">Vault Escrow</p>
+                  <p className="text-2xl font-bold text-hui-text">${(circle.vaultBalance / 1_000_000).toFixed(2)}</p>
+                </div>
+              )}
+              <div className="text-right">
+                <p className="text-xs text-hui-text-tertiary mb-0.5">Pot per round</p>
+                <p className="text-2xl font-bold text-hui-primary">${potAmount}</p>
+              </div>
             </div>
           </div>
 
@@ -241,23 +255,26 @@ export default function CircleDashboard() {
           <div className="card">
             <h3 className="font-semibold text-hui-text mb-1">Round {circle.currentRound} Contribution</h3>
             <p className="text-sm text-hui-text-secondary mb-4">
-              Contribute ${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC to the vault.
+              {hasPaidCurrentRound 
+                ? 'Your contribution for this round has been successfully recorded on-chain.'
+                : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC to the vault.`}
             </p>
             <button
               onClick={handleContribute}
-              disabled={isLoading}
-              className="btn-primary w-full"
+              disabled={isLoading || hasPaidCurrentRound}
+              className={[
+                'btn-primary w-full transition-all duration-200',
+                hasPaidCurrentRound 
+                  ? 'bg-stone-100 hover:bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-80'
+                  : ''
+              ].join(' ')}
             >
-              {isLoading ? 'Sending…' : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC`}
+              {isLoading 
+                ? 'Sending…' 
+                : hasPaidCurrentRound 
+                ? '✓ Contributed — waiting for others' 
+                : `Contribute $${(circle.contributionAmount / 1_000_000).toFixed(0)} USDC`}
             </button>
-          </div>
-        )}
-
-        {/* Vault balance */}
-        {circle.vaultBalance !== undefined && circle.vaultBalance > 0 && (
-          <div className="card flex items-center justify-between">
-            <span className="text-sm text-hui-text-secondary">Vault Balance</span>
-            <span className="font-bold text-hui-text">${(circle.vaultBalance / 1_000_000).toFixed(2)} USDC</span>
           </div>
         )}
 
