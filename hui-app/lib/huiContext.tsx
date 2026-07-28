@@ -143,10 +143,41 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
     const program = getProgram();
     if (!program) return;
     try {
-      const all = await (program.account as any).circle.all([
+      // 1. Fetch circles created by this wallet
+      const created = await (program.account as any).circle.all([
         { memcmp: { offset: 8, bytes: wallet.publicKey.toBase58() } },
       ]);
-      const parsed = all.map((a: any) => circleFromOnChain(a.publicKey, a.account));
+
+      // 2. Fetch member records for this wallet to find joined circles
+      const memberRecords = await (program.account as any).memberRecord.all([
+        { memcmp: { offset: 8, bytes: wallet.publicKey.toBase58() } },
+      ]);
+
+      // Extract unique circle addresses we joined but didn't create
+      const joinedCircleKeys = memberRecords
+        .map((r: any) => r.account.circle as PublicKey)
+        .filter((circlePubkey: PublicKey) => 
+          !created.some((c: any) => c.publicKey.equals(circlePubkey))
+        );
+
+      // Fetch the full account state for the joined circles
+      const joinedCirclesRaw = await Promise.all(
+        joinedCircleKeys.map(async (key: PublicKey) => {
+          try {
+            const acc = await (program.account as any).circle.fetch(key);
+            return { publicKey: key, account: acc };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const validJoined = joinedCirclesRaw.filter(c => c !== null) as any[];
+
+      // Combine both lists
+      const allCircles = [...created, ...validJoined];
+      const parsed = allCircles.map((a: any) => circleFromOnChain(a.publicKey, a.account));
+
       setCircles(parsed);
     } catch (e) {
       console.error('loadCircles', e);
