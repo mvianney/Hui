@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import { getOrCreateAssociatedTokenAccount, mintTo, getAccount } from '@solana/spl-token';
 
 // 1000 USDC (6 decimal places)
@@ -61,6 +61,27 @@ export async function POST(req: NextRequest) {
 
     const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
     const connection = new Connection(rpcUrl, 'confirmed');
+
+    // Airdrop SOL from faucet wallet if user has < 0.05 SOL
+    try {
+      const solBalance = await connection.getBalance(recipientPubkey);
+      if (solBalance < 50_000_000) {
+        console.log(`[faucet] Recipient SOL balance is low (${solBalance} lamports). Transferring 0.05 SOL...`);
+        const transferTx = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: faucetKeypair.publicKey,
+            toPubkey: recipientPubkey,
+            lamports: 50_000_000, // 0.05 SOL
+          })
+        );
+        const signature = await connection.sendTransaction(transferTx, [faucetKeypair]);
+        await connection.confirmTransaction(signature, 'confirmed');
+        console.log(`[faucet] SOL transfer confirmed: ${signature}`);
+      }
+    } catch (solErr) {
+      console.error('[faucet] SOL top-up failed:', solErr);
+      // Don't throw, proceed to token faucet anyway in case it was a transient error
+    }
 
     // Get or create the recipient's associated token account
     const ata = await getOrCreateAssociatedTokenAccount(
