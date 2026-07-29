@@ -1,109 +1,137 @@
 # Hụi On-Chain
-
-A trustless implementation of the Vietnamese rotating savings circle (*hụi*) on the Solana blockchain.
-
-## What This Is
-
-Hụi is a traditional Vietnamese ROSCA (Rotating Savings and Credit Association) where a group of members each contribute a fixed amount every round, and one member receives the entire pot per round until everyone has received once. The problem with traditional hụi is custody risk — the organizer (*chủ hụi*) holds all the money, and absconding (*giật hụi*) is a documented real-world failure mode. This project replaces the human custodian with a Solana program-controlled escrow vault. Contributions go into the vault on-chain; payouts are triggered only when all members have contributed for the round. No single party can take the money.
-
-This project was built as part of a hackathon/bounty to demonstrate a production-ready Solana smart contract for traditional finance use cases in Southeast Asia.
+**A trustless implementation of Vietnam's traditional rotating savings circle (*hụi*) on Solana.**
 
 ---
 
-## Current Status
-
-**Anchor program:** Deployed and verified on Solana Devnet.
-- Program ID: `BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB`
-- 12/12 tests passing (happy path, missed payment scenario, negative tests)
-- Instructions implemented: `create_circle`, `join_circle`, `contribute`, `trigger_payout`, `mark_missed`, `finalize_member`
-
-**Frontend (Next.js):** Wired to real on-chain Anchor program calls — no mock data layer.
-- Wallet connection via Phantom (using `@solana/wallet-adapter-react`)
-- Creates circles, joins via invite code, contributes SPL tokens, triggers payouts
-- Reads live on-chain state for circle dashboard
-- Production build passes with zero TypeScript/ESLint errors
-
-**Tested end-to-end:** Full 5-round lifecycle executed programmatically against local validator with real transaction signatures and balance changes verified per round.
+## 🔗 Live Demo
+* **App URL:** [https://hui-mu.vercel.app](https://hui-mu.vercel.app)
+* **Target Network:** Solana Devnet
+* **Testing Guide:**
+  1. Install the [Phantom Wallet](https://phantom.app/) browser extension and switch the network settings to **Devnet**.
+  2. Visit [https://hui-mu.vercel.app](https://hui-mu.vercel.app).
+  3. Connect your wallet and click the in-app **"Get Test USDC"** faucet button to receive test Devnet SOL and test USDC instantly. No CLI commands or external faucets are required for judges or testers to execute transactions.
 
 ---
 
-## Tech Stack
+## 📖 What This Is
+*Hụi* (also known as rotating savings circles or ROSCAs) is a popular, century-old traditional financial system in Vietnam and Southeast Asia. A group of trusted individuals gathers to pool money; each round, every member contributes a set amount, and one member receives the accumulated pool (the pot). The rounds repeat until every member has received the pot exactly once.
 
-| Layer | Technology |
-|-------|-----------|
-| Smart Contract | Rust, Anchor 0.30.1 |
-| Blockchain | Solana (Devnet / local validator) |
-| Frontend | Next.js 14, TypeScript, Tailwind CSS |
-| Wallet | Phantom via `@solana/wallet-adapter-react` |
-| Token | SPL Token (mock USDC for devnet testing) |
+### The Problem
+Traditional hụi relies entirely on a single trusted human custodian—the host (*chủ hụi*). Real-world custody failure is highly common; the host can abscond with the pool (*giật hụi*), or the circle can collapse due to unpaid contributions (*bể hụi / vỡ hụi*). This results in recurring, devastating financial harm to households that rely on hụi for credit.
+
+### The Solution
+**Hụi On-Chain** replaces the centralized custodian with a decentralized Solana program (smart contract). All pooled funds are held in a Program Derived Address (PDA) escrow vault governed solely by the code. 
+* **Escrow Guarantee:** No individual (including the creator) can withdraw vault funds arbitrarily.
+* **Automated Release:** Payouts are triggered automatically to that round's designated recipient's account the moment the final member's contribution for that round is confirmed.
 
 ---
 
-## Local Setup
+## ⚡ Why On-Chain?
+* **Zero Host Risk:** By moving custody to a smart contract escrow, the single point of failure (the host) is eliminated entirely.
+* **Permissionless Payouts:** Funds are locked to the specific slots set during setup. Payout release does not depend on a host's approval.
+* **Legal Context:** Hụi is a recognized, legally valid contract structure in Vietnam under **Article 471 of the 2015 Civil Code of Vietnam**, making an on-chain translation highly compatible with local regulatory environments.
 
-### Requirements
+---
 
-- Rust + Cargo (`rustup`)
-- Solana CLI ≥ 1.18
-- Anchor CLI 1.0.2 (`cargo install --git https://github.com/coral-xyz/anchor avm`)
-- Node.js ≥ 18
-- Phantom browser extension
+## 🛠️ Tech Stack
+* **On-Chain Program:** Rust, Anchor Framework (0.30.1)
+* **Client Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS
+* **Wallet Connection:** `@solana/wallet-adapter-react` (supporting Phantom and standard Solana wallets)
+* **Tokens:** SPL Token Standard (representing test USDC)
+* **Hosting:** Vercel
 
-### Run the frontend
+---
 
+## 🗃️ Program Info
+* **Cluster:** Devnet
+* **Program ID:** `BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB`
+* **Solana Explorer:** [View on Explorer](https://explorer.solana.com/address/BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB?cluster=devnet)
+
+---
+
+## ⚙️ How It Works (Actual Current Flow)
+1. **Circle Creation:** The creator initializes a circle by specifying:
+   * A circle name
+   * Contribution amount per round (in USDC)
+   * Round frequency (Weekly or Monthly)
+   * Number of slots (rounds)
+   * The creator chooses their own payout slot and inputs their display name directly during creation.
+2. **Joining:** Other members join the circle by entering the shareable 6-character Invite Code. They choose from the remaining open slots (already taken slots are disabled) and input their display name.
+3. **Pending Start:** The dashboard updates live as users join. Once all slots are filled (100% capacity), the status changes to "Pending Start". Only the circle's creator can click **"Start Circle"** to lock the slots, set the start timestamp, and begin the rounds.
+4. **Contributions:** During an active round, members contribute the round amount. A countdown display indicates the contribution deadline (Weekly circles use a 5-day payment window; Monthly circles scale proportionally to a 21-day window). Contributions are accepted late past the deadline without a hard cutoff.
+5. **Automated Payout:** When the final contribution transaction completes the round, the program automatically invokes `trigger_payout` in the same transaction flow, instantly releasing the vault balance to the designated slot recipient.
+6. **Fallback Release:** If the automated trigger fails (network dropouts, RPC lag, etc.), a fallback **"Release Payout"** card becomes visible on the dashboard *only* to the circle's creator, enabling them to manually trigger the payout and unstick the round.
+
+---
+
+## ⚠️ Known Limitations
+* **Fixed Payout Order Only:** Slot selections are chosen at join-time and remain fixed. The traditional interest bidding mechanism (where members bid interest rates to obtain early pots) is not yet supported.
+* **No Auto-Closure or Auto-Refunds:** If a member fails to contribute, the round remains open indefinitely. The creator can call `mark_missed` to label a delinquent member publicly on-chain, but the circle does not automatically close or refund.
+* **Deadlines are Informational:** The contribution deadlines shown on the dashboard are visual targets. There is no on-chain penalty enforcement preventing members from paying after the deadline.
+* **Test Tokens Only:** The USDC token used is a test token minted through our Devnet faucet, not mainnet USDC.
+* **Single Creator Verifier:** For missed payments, `mark_missed` is gated to the circle creator's signature rather than a decentralized multi-member vote.
+
+---
+
+## 💻 Local Setup
+
+### 1. Verification of Requirements
+To run or verify this project, ensure you have the following toolchains installed:
 ```bash
-cd hui-app
-cp .env.example .env.local     # adjust values if needed
-npm install
-npm run dev
-# Open http://localhost:3000
+# Verify Rust & Cargo
+rustc --version
+cargo --version
+
+# Verify Solana CLI
+solana --version
+
+# Verify Anchor CLI
+anchor --version
+
+# Verify Node.js
+node --version
 ```
 
-### Run Anchor tests (requires local validator)
+### 2. Frontend Installation & Environment Setup
+1. Navigate to the frontend directory:
+   ```bash
+   cd hui-app
+   ```
+2. Create your local environment configuration:
+   ```bash
+   cp .env.example .env.local
+   ```
+3. Configure the following environment variables in `.env.local`:
+   * `NEXT_PUBLIC_SOLANA_RPC_URL`: Set to devnet (e.g., `https://api.devnet.solana.com` or custom RPC provider).
+   * `NEXT_PUBLIC_PROGRAM_ID`: `BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB`
+   * `NEXT_PUBLIC_USDC_MINT`: The token mint address of your test USDC.
+   * *Note: `FAUCET_KEYPAIR` is a server-only secret required for the faucet API and is not needed for general client/development setups.*
+4. Install dependencies and start the local development server:
+   ```bash
+   npm install
+   npm run dev
+   # The client will run at http://localhost:3000
+   ```
 
-```bash
-cd hui-program
-anchor test
-# Runs 12 tests against a local validator spun up automatically
-```
-
-### Deploy program to devnet (already deployed — only needed if redeploying)
-
-```bash
-cd hui-program
-anchor build
-solana program deploy target/deploy/hui.so \
-  --program-id target/deploy/hui-keypair.json \
-  --url https://api.devnet.solana.com
-```
+### 3. Anchor Smart Contract Setup & Tests
+1. Navigate to the contract folder:
+   ```bash
+   cd hui-program
+   ```
+2. Build the program:
+   ```bash
+   anchor build
+   ```
+3. Run the automated integration tests:
+   ```bash
+   anchor test
+   ```
+   *This command spins up a local Solana validator automatically, deploys the program, and executes the suite of tests validating the ROSCA happy path, slot collision handling, start-circle auth, and missed payments scenarios.*
 
 ---
 
-## Devnet Program
-
-- **Program ID:** `BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB`
-- **Explorer:** https://explorer.solana.com/address/BAUzUZpbXTqtfWaRd4ANUgLA1wSh6QiKTt6ChhdWWdpB?cluster=devnet
-- **To test:** Switch Phantom to Devnet, get test SOL from https://faucet.solana.com, open the frontend
-
----
-
-## Known Limitations
-
-- **Fixed payout order only.** Payout order is set at circle creation and cannot be changed. A bidding/auction mechanism for payout position (standard in commercial hụi) is on the roadmap.
-- **Single verifier model for missed payments.** `mark_missed` can currently only be called by the circle creator acting as sole verifier. A decentralised quorum model is not yet implemented.
-- **Simulated members are local-only.** The frontend can auto-sign contributions for non-real members, but this feature is strictly gated to localhost/local validator and will refuse to run on devnet or mainnet.
-- **Mock USDC only on devnet.** The app uses a locally-minted SPL test token as a USDC stand-in. Real USDC integration requires Circle's token on mainnet.
-- **No reputation portability.** On-chain reputation records exist per circle but are not yet aggregated or cross-referenced across multiple circles.
-- **No dispute resolution.** If a member misses a payment and the creator does not call `mark_missed`, the round stalls. There is no timeout-based auto-resolution yet.
-
----
-
-## Roadmap
-
-- [ ] Bidding auction for payout position (members bid SOL to go earlier)
-- [ ] Decentralised missed-payment verification (quorum of members, not just creator)
-- [ ] Cross-circle reputation aggregation on-chain
-- [ ] Real USDC integration (mainnet)
-- [ ] Timeout-based auto-resolution for stalled rounds
-- [ ] Mobile-optimised UI
-- [ ] Mainnet deployment
+## 🗺️ Roadmap
+- [ ] **Bidding Auction Mechanism:** Implement interest-rate bidding rounds where members bid interest to obtain earlier payouts.
+- [ ] **Decentralized Disputes:** Upgrade missed-payment validation to require a quorum/majority vote of circle members instead of trusting the creator alone.
+- [ ] **Auto-Closure and Refund Gating:** Implement timeout rules on stalled rounds to allow automated returns of escrowed deposits.
+- [ ] **Mainnet Integration:** Switch token wrappers to interact with real USDC on Solana Mainnet.
