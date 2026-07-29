@@ -27,12 +27,28 @@ export default function CircleDashboard() {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
   const [memberHistories, setMemberHistories] = useState<Record<string, { completed: number; missed: number }>>({});
+  const [reputationLoading, setReputationLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     const c = await loadCircle(id);
     setCircle(c);
     setLoading(false);
   }, [id, loadCircle]);
+
+  const forceRefreshReputation = useCallback(async () => {
+    if (!circle) return;
+    setReputationLoading(true);
+    const updated: Record<string, { completed: number; missed: number }> = {};
+    for (const member of circle.members) {
+      const hist = await getWalletHistory(member.wallet);
+      if (hist) {
+        updated[member.wallet] = hist;
+      }
+    }
+    setMemberHistories(updated);
+    // Add artificial delay to make the update clear and allow RPC to settle
+    setTimeout(() => setReputationLoading(false), 1500);
+  }, [circle, getWalletHistory]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -73,7 +89,8 @@ export default function CircleDashboard() {
       }
     };
     fetchHistories();
-  }, [circle, getWalletHistory, memberHistories]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circle, getWalletHistory]);
 
   // Tick the countdown clock
   useEffect(() => {
@@ -162,12 +179,34 @@ export default function CircleDashboard() {
 
   async function handleContribute() {
     const ok = await contribute(circle!.id);
-    if (ok) await refresh();
+    if (ok) {
+      // Check if this contribution completed the round
+      const totalRounds = circle!.totalRounds;
+      const expectedMask = (1 << totalRounds) - 1;
+      const rIndex = circle!.currentRound - 1;
+      const currentMask = circle!.contributions[rIndex] || 0;
+      const myBit = 1 << (mySlotIndex || 0);
+      const isCompletedAfterMe = ((currentMask | myBit) & expectedMask) === expectedMask;
+
+      if (isCompletedAfterMe) {
+        console.log("Completed round. Waiting 3 seconds for RPC node index cache...");
+        setTimeout(async () => {
+          await refresh();
+        }, 3000);
+      } else {
+        await refresh();
+      }
+    }
   }
 
   async function handleReleasePayout() {
     const ok = await triggerPayout(circle!.id);
-    if (ok) await refresh();
+    if (ok) {
+      console.log("Triggered payout. Waiting 3 seconds for RPC node index cache...");
+      setTimeout(async () => {
+        await refresh();
+      }, 3000);
+    }
   }
 
   return (
@@ -236,9 +275,21 @@ export default function CircleDashboard() {
         {/* Slot grid — visible when pending or active */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-hui-text">
-              {circle.status === 'pending' ? 'Slots' : 'Payout Order'}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-hui-text">
+                {circle.status === 'pending' ? 'Slots' : 'Payout Order'}
+              </h2>
+              {circle.members.length > 0 && (
+                <button
+                  onClick={forceRefreshReputation}
+                  disabled={reputationLoading}
+                  className="text-xs text-hui-primary hover:underline flex items-center gap-1 disabled:opacity-50"
+                  title="Force refresh reputations from on-chain history"
+                >
+                  {reputationLoading ? '⏳ Refreshing...' : '🔄 Refresh Reputation'}
+                </button>
+              )}
+            </div>
             {circle.status === 'pending' && (
               <span className="text-sm text-hui-text-secondary">
                 {slotsOpen} open · {circle.slotsFilled} filled
