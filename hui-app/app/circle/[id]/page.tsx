@@ -21,11 +21,12 @@ export default function CircleDashboard() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { publicKey } = useWallet();
-  const { loadCircle, startCircle, contribute, triggerPayout, isLoading } = useHui();
+  const { loadCircle, startCircle, contribute, triggerPayout, getWalletHistory, isLoading } = useHui();
 
   const [circle, setCircle] = useState<Circle | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
+  const [memberHistories, setMemberHistories] = useState<Record<string, { completed: number; missed: number }>>({});
 
   const refresh = useCallback(async () => {
     const c = await loadCircle(id);
@@ -34,6 +35,28 @@ export default function CircleDashboard() {
   }, [id, loadCircle]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Fetch histories for all members
+  useEffect(() => {
+    if (!circle) return;
+    const fetchHistories = async () => {
+      const updated: Record<string, { completed: number; missed: number }> = { ...memberHistories };
+      let hasNew = false;
+      for (const member of circle.members) {
+        if (updated[member.wallet] === undefined) {
+          const hist = await getWalletHistory(member.wallet);
+          if (hist) {
+            updated[member.wallet] = hist;
+            hasNew = true;
+          }
+        }
+      }
+      if (hasNew) {
+        setMemberHistories(updated);
+      }
+    };
+    fetchHistories();
+  }, [circle, getWalletHistory, memberHistories]);
 
   // Tick the countdown clock
   useEffect(() => {
@@ -233,6 +256,11 @@ export default function CircleDashboard() {
                     <>
                       <p className="font-semibold text-hui-text text-sm truncate mt-1">{slot.member!.displayName || '—'}</p>
                       <p className="text-xs text-hui-text-tertiary font-mono truncate">{truncate(slot.member!.wallet)}</p>
+                      <p className="text-[10px] text-hui-text-secondary mt-1.5 border-t border-hui-border/40 pt-1.5">
+                        {memberHistories[slot.member!.wallet]
+                          ? `${memberHistories[slot.member!.wallet].completed} completed · ${memberHistories[slot.member!.wallet].missed} missed`
+                          : 'New member, no history'}
+                      </p>
                     </>
                   ) : (
                     <div className="mt-1">

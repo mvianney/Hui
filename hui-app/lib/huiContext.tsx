@@ -43,6 +43,7 @@ interface HuiContextValue {
   contribute: (circleId: string) => Promise<boolean>;
   triggerPayout: (circleId: string) => Promise<boolean>;
   getMemberReputation: (circle: Circle, wallet: string) => MemberReputation | null;
+  getWalletHistory: (wallet: string) => Promise<{ completed: number; missed: number } | null>;
 }
 
 const HuiContext = createContext<HuiContextValue | null>(null);
@@ -562,13 +563,37 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // ── getWalletHistory ──────────────────────────────────────────
+  const getWalletHistory = useCallback(async (walletAddr: string): Promise<{ completed: number; missed: number } | null> => {
+    const program = getProgram();
+    if (!program) return null;
+    try {
+      const records = await (program.account as any).memberRecord.all([
+        { memcmp: { offset: 8, bytes: walletAddr } },
+      ]);
+      let completed = 0;
+      let missed = 0;
+      for (const r of records) {
+        if (r.account.completedCircle) {
+          completed += 1;
+        }
+        missed += r.account.roundsMissed || 0;
+      }
+      return { completed, missed };
+    } catch (e) {
+      console.error('getWalletHistory', e);
+      return null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection]);
+
   return (
     <HuiContext.Provider value={{
       circles, currentCircle, isLoading, toasts,
       addToast, removeToast,
       loadCircles, loadCircle, lookupInviteCode,
       createCircle, joinCircle, startCircle, contribute, triggerPayout,
-      getMemberReputation,
+      getMemberReputation, getWalletHistory,
     }}>
       {children}
     </HuiContext.Provider>
