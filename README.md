@@ -9,7 +9,7 @@
 * **Testing Guide:**
   1. Install the [Phantom Wallet](https://phantom.app/) browser extension and switch the network settings to **Devnet**.
   2. Visit [https://hui-mu.vercel.app](https://hui-mu.vercel.app).
-  3. Connect your wallet and click the in-app **"Get Test USDC"** faucet button to receive test Devnet SOL and test USDC instantly. No CLI commands or external faucets are required for judges or testers to execute transactions.
+  3. Connect your wallet and click **"Get Test USDC"** to receive test USDC instantly. Note: you'll also need a small amount of Devnet SOL for transaction fees — if the in-app faucet doesn't provide this automatically, get free Devnet SOL manually from [faucet.solana.com](https://faucet.solana.com) before creating or joining a circle.
 
 ---
 
@@ -58,7 +58,7 @@ Traditional hụi relies entirely on a single trusted human custodian—the host
    * The creator chooses their own payout slot and inputs their display name directly during creation.
 2. **Joining:** Other members join the circle by entering the shareable 6-character Invite Code. They choose from the remaining open slots (already taken slots are disabled) and input their display name.
 3. **Pending Start:** The dashboard updates live as users join. Once all slots are filled (100% capacity), the status changes to "Pending Start". Only the circle's creator can click **"Start Circle"** to lock the slots, set the start timestamp, and begin the rounds.
-4. **Contributions:** During an active round, members contribute the round amount. A countdown display indicates the contribution deadline (Weekly circles use a 5-day payment window; Monthly circles scale proportionally to a 21-day window). Contributions are accepted late past the deadline without a hard cutoff.
+4. **Contributions:** During an active round, members contribute the round amount. A countdown display indicates the contribution deadline (Weekly circles use a 5-day payment window; Monthly circles scale proportionally to a 21.4-day payment window out of the 30-day cycle). Contributions are accepted late past the deadline without a hard cutoff.
 5. **Automated Payout:** When the final contribution transaction completes the round, the program automatically invokes `trigger_payout` in the same transaction flow, instantly releasing the vault balance to the designated slot recipient.
 6. **Fallback Release:** If the automated trigger fails (network dropouts, RPC lag, etc.), a fallback **"Release Payout"** card becomes visible on the dashboard *only* to the circle's creator, enabling them to manually trigger the payout and unstick the round.
 
@@ -69,7 +69,7 @@ Traditional hụi relies entirely on a single trusted human custodian—the host
 * **No Auto-Closure or Auto-Refunds:** If a member fails to contribute, the round remains open indefinitely. The creator can call `mark_missed` to label a delinquent member publicly on-chain, but the circle does not automatically close or refund.
 * **Deadlines are Informational:** The contribution deadlines shown on the dashboard are visual targets. There is no on-chain penalty enforcement preventing members from paying after the deadline.
 * **Test Tokens Only:** The USDC token used is a test token minted through our Devnet faucet, not mainnet USDC.
-* **Single Creator Verifier:** For missed payments, `mark_missed` is gated to the circle creator's signature rather than a decentralized multi-member vote.
+* **Defaulter Marking is Permissionless but Blocked:** The `mark_missed` instruction is permissionless at the program level—any caller can flag a delinquent member after the grace period has elapsed. However, flagging does not unblock the round or auto-advance state; the round remains open until payment is received.
 
 ---
 
