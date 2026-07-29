@@ -282,7 +282,9 @@ export default function CircleDashboard() {
         {/* Pending actions */}
         {circle.status === 'pending' && (
           <div className="card">
-            <h3 className="font-semibold text-hui-text mb-3">Waiting for Members</h3>
+            <h3 className="font-semibold text-hui-text mb-3">
+              {allSlotsFilled ? 'Pending Start' : 'Waiting for Members'}
+            </h3>
             <ProgressBar
               value={(circle.slotsFilled / circle.totalRounds) * 100}
               label={`${circle.slotsFilled} of ${circle.totalRounds} slots filled`}
