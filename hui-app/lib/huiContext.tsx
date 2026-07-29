@@ -479,6 +479,38 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
             .rpc();
 
           addToast('Payout released successfully to the recipient!', 'success');
+
+          // Check if circle is now Completed, and finalize members in background
+          try {
+            const updatedCircle = await (program.account as any).circle.fetch(circlePda);
+            const statusKey = Object.keys(updatedCircle.status)[0];
+            if (statusKey === 'completed') {
+              addToast('Circle complete! Finalizing member reputations...', 'info');
+              const defaultKey = PublicKey.default.toBase58();
+              const joinedMembers = (updatedCircle.payoutOrder as PublicKey[])
+                .filter(p => p.toBase58() !== defaultKey);
+
+              for (const member of joinedMembers) {
+                try {
+                  const [mRecordPda] = findMemberRecordPda(circlePda, member);
+                  await (program.methods as any)
+                    .finalizeMember()
+                    .accounts({
+                      caller: wallet.publicKey,
+                      circle: circlePda,
+                      member,
+                      memberRecord: mRecordPda,
+                    })
+                    .rpc();
+                } catch (err) {
+                  console.error('Auto-finalize member record failed:', member.toBase58(), err);
+                }
+              }
+              addToast('All member records finalized successfully!', 'success');
+            }
+          } catch (finalizeErr) {
+            console.error('Auto-finalization failed:', finalizeErr);
+          }
         }
       } catch (payoutError) {
         console.error('Auto-payout error fallback:', payoutError);
@@ -540,6 +572,39 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
         .rpc();
 
       addToast('Payout released successfully to the recipient!', 'success');
+
+      // Check if circle is now Completed, and finalize members in background
+      try {
+        const updatedCircle = await (program.account as any).circle.fetch(circlePda);
+        const statusKey = Object.keys(updatedCircle.status)[0];
+        if (statusKey === 'completed') {
+          addToast('Circle complete! Finalizing member reputations...', 'info');
+          const defaultKey = PublicKey.default.toBase58();
+          const joinedMembers = (updatedCircle.payoutOrder as PublicKey[])
+            .filter(p => p.toBase58() !== defaultKey);
+
+          for (const member of joinedMembers) {
+            try {
+              const [memberRecordPda] = findMemberRecordPda(circlePda, member);
+              await (program.methods as any)
+                .finalizeMember()
+                .accounts({
+                  caller: wallet.publicKey,
+                  circle: circlePda,
+                  member,
+                  memberRecord: memberRecordPda,
+                })
+                .rpc();
+            } catch (err) {
+              console.error('Auto-finalize member record failed:', member.toBase58(), err);
+            }
+          }
+          addToast('All member records finalized successfully!', 'success');
+        }
+      } catch (finalizeErr) {
+        console.error('Auto-finalization failed:', finalizeErr);
+      }
+
       return true;
     } catch (e: any) {
       console.error('triggerPayout', e);
