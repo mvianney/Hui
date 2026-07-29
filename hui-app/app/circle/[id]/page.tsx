@@ -21,13 +21,11 @@ export default function CircleDashboard() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { publicKey } = useWallet();
-  const { loadCircle, startCircle, contribute, triggerPayout, getWalletHistory, finalizeMember, isLoading } = useHui();
+  const { loadCircle, startCircle, contribute, triggerPayout, isLoading } = useHui();
 
   const [circle, setCircle] = useState<Circle | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
-  const [memberHistories, setMemberHistories] = useState<Record<string, { completed: number; missed: number }>>({});
-  const [reputationLoading, setReputationLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     const c = await loadCircle(id);
@@ -35,62 +33,7 @@ export default function CircleDashboard() {
     setLoading(false);
   }, [id, loadCircle]);
 
-  const forceRefreshReputation = useCallback(async () => {
-    if (!circle) return;
-    setReputationLoading(true);
-    const updated: Record<string, { completed: number; missed: number }> = {};
-    for (const member of circle.members) {
-      const hist = await getWalletHistory(member.wallet);
-      if (hist) {
-        updated[member.wallet] = hist;
-      }
-    }
-    setMemberHistories(updated);
-    // Add artificial delay to make the update clear and allow RPC to settle
-    setTimeout(() => setReputationLoading(false), 1500);
-  }, [circle, getWalletHistory]);
-
   useEffect(() => { refresh(); }, [refresh]);
-
-  // Background self-healing finalizer for completed circles
-  useEffect(() => {
-    if (!circle || circle.status !== 'completed' || !publicKey) return;
-    const healFinalization = async () => {
-      console.log('[Dashboard] Auto-healing completed circle member finalizations...');
-      for (const member of circle.members) {
-        try {
-          await finalizeMember(circle.id, member.wallet, true);
-        } catch {
-          // Ignore
-        }
-      }
-    };
-    healFinalization();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [circle, publicKey]);
-
-  // Fetch histories for all members
-  useEffect(() => {
-    if (!circle) return;
-    const fetchHistories = async () => {
-      const updated: Record<string, { completed: number; missed: number }> = { ...memberHistories };
-      let hasNew = false;
-      for (const member of circle.members) {
-        if (updated[member.wallet] === undefined) {
-          const hist = await getWalletHistory(member.wallet);
-          if (hist) {
-            updated[member.wallet] = hist;
-            hasNew = true;
-          }
-        }
-      }
-      if (hasNew) {
-        setMemberHistories(updated);
-      }
-    };
-    fetchHistories();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [circle, getWalletHistory]);
 
   // Tick the countdown clock
   useEffect(() => {
@@ -179,34 +122,12 @@ export default function CircleDashboard() {
 
   async function handleContribute() {
     const ok = await contribute(circle!.id);
-    if (ok) {
-      // Check if this contribution completed the round
-      const totalRounds = circle!.totalRounds;
-      const expectedMask = (1 << totalRounds) - 1;
-      const rIndex = circle!.currentRound - 1;
-      const currentMask = circle!.contributions[rIndex] || 0;
-      const myBit = 1 << (mySlotIndex || 0);
-      const isCompletedAfterMe = ((currentMask | myBit) & expectedMask) === expectedMask;
-
-      if (isCompletedAfterMe) {
-        console.log("Completed round. Waiting 3 seconds for RPC node index cache...");
-        setTimeout(async () => {
-          await refresh();
-        }, 3000);
-      } else {
-        await refresh();
-      }
-    }
+    if (ok) await refresh();
   }
 
   async function handleReleasePayout() {
     const ok = await triggerPayout(circle!.id);
-    if (ok) {
-      console.log("Triggered payout. Waiting 3 seconds for RPC node index cache...");
-      setTimeout(async () => {
-        await refresh();
-      }, 3000);
-    }
+    if (ok) await refresh();
   }
 
   return (
@@ -275,21 +196,9 @@ export default function CircleDashboard() {
         {/* Slot grid — visible when pending or active */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-hui-text">
-                {circle.status === 'pending' ? 'Slots' : 'Payout Order'}
-              </h2>
-              {circle.members.length > 0 && (
-                <button
-                  onClick={forceRefreshReputation}
-                  disabled={reputationLoading}
-                  className="text-xs text-hui-primary hover:underline flex items-center gap-1 disabled:opacity-50"
-                  title="Force refresh reputations from on-chain history"
-                >
-                  {reputationLoading ? '⏳ Refreshing...' : '🔄 Refresh Reputation'}
-                </button>
-              )}
-            </div>
+            <h2 className="font-semibold text-hui-text">
+              {circle.status === 'pending' ? 'Slots' : 'Payout Order'}
+            </h2>
             {circle.status === 'pending' && (
               <span className="text-sm text-hui-text-secondary">
                 {slotsOpen} open · {circle.slotsFilled} filled
@@ -324,11 +233,6 @@ export default function CircleDashboard() {
                     <>
                       <p className="font-semibold text-hui-text text-sm truncate mt-1">{slot.member!.displayName || '—'}</p>
                       <p className="text-xs text-hui-text-tertiary font-mono truncate">{truncate(slot.member!.wallet)}</p>
-                      <p className="text-[10px] text-hui-text-secondary mt-1.5 border-t border-hui-border/40 pt-1.5">
-                        {memberHistories[slot.member!.wallet]
-                          ? `${memberHistories[slot.member!.wallet].completed} completed · ${memberHistories[slot.member!.wallet].missed} missed`
-                          : 'New member, no history'}
-                      </p>
                     </>
                   ) : (
                     <div className="mt-1">

@@ -43,8 +43,6 @@ interface HuiContextValue {
   contribute: (circleId: string) => Promise<boolean>;
   triggerPayout: (circleId: string) => Promise<boolean>;
   getMemberReputation: (circle: Circle, wallet: string) => MemberReputation | null;
-  getWalletHistory: (wallet: string) => Promise<{ completed: number; missed: number } | null>;
-  finalizeMember: (circleId: string, memberAddr: string, silent?: boolean) => Promise<boolean>;
 }
 
 const HuiContext = createContext<HuiContextValue | null>(null);
@@ -478,39 +476,7 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
             })
             .rpc();
 
-          addToast('Payout released successfully to the recipient!', 'success');
-
-          // Check if circle is now Completed, and finalize members in background
-          try {
-            const updatedCircle = await (program.account as any).circle.fetch(circlePda);
-            const statusKey = Object.keys(updatedCircle.status)[0];
-            if (statusKey === 'completed') {
-              addToast('Circle complete! Finalizing member reputations...', 'info');
-              const defaultKey = PublicKey.default.toBase58();
-              const joinedMembers = (updatedCircle.payoutOrder as PublicKey[])
-                .filter(p => p.toBase58() !== defaultKey);
-
-              for (const member of joinedMembers) {
-                try {
-                  const [mRecordPda] = findMemberRecordPda(circlePda, member);
-                  await (program.methods as any)
-                    .finalizeMember()
-                    .accounts({
-                      caller: wallet.publicKey,
-                      circle: circlePda,
-                      member,
-                      memberRecord: mRecordPda,
-                    })
-                    .rpc();
-                } catch (err) {
-                  console.error('Auto-finalize member record failed:', member.toBase58(), err);
-                }
-              }
-              addToast('All member records finalized successfully!', 'success');
-            }
-          } catch (finalizeErr) {
-            console.error('Auto-finalization failed:', finalizeErr);
-          }
+           addToast('Payout released successfully to the recipient!', 'success');
         }
       } catch (payoutError) {
         console.error('Auto-payout error fallback:', payoutError);
@@ -572,39 +538,6 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
         .rpc();
 
       addToast('Payout released successfully to the recipient!', 'success');
-
-      // Check if circle is now Completed, and finalize members in background
-      try {
-        const updatedCircle = await (program.account as any).circle.fetch(circlePda);
-        const statusKey = Object.keys(updatedCircle.status)[0];
-        if (statusKey === 'completed') {
-          addToast('Circle complete! Finalizing member reputations...', 'info');
-          const defaultKey = PublicKey.default.toBase58();
-          const joinedMembers = (updatedCircle.payoutOrder as PublicKey[])
-            .filter(p => p.toBase58() !== defaultKey);
-
-          for (const member of joinedMembers) {
-            try {
-              const [memberRecordPda] = findMemberRecordPda(circlePda, member);
-              await (program.methods as any)
-                .finalizeMember()
-                .accounts({
-                  caller: wallet.publicKey,
-                  circle: circlePda,
-                  member,
-                  memberRecord: memberRecordPda,
-                })
-                .rpc();
-            } catch (err) {
-              console.error('Auto-finalize member record failed:', member.toBase58(), err);
-            }
-          }
-          addToast('All member records finalized successfully!', 'success');
-        }
-      } catch (finalizeErr) {
-        console.error('Auto-finalization failed:', finalizeErr);
-      }
-
       return true;
     } catch (e: any) {
       console.error('triggerPayout', e);
@@ -629,78 +562,13 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // ── getWalletHistory ──────────────────────────────────────────
-  const getWalletHistory = useCallback(async (walletAddr: string): Promise<{ completed: number; missed: number } | null> => {
-    const program = getProgram();
-    if (!program) return null;
-    try {
-      const records = await (program.account as any).memberRecord.all([
-        { memcmp: { offset: 8, bytes: walletAddr } },
-      ]);
-      console.log('[getWalletHistory] raw records fetched for', walletAddr, records.map((r: any) => ({
-        circle: r.account.circle.toBase58(),
-        member: r.account.member.toBase58(),
-        completedCircle: r.account.completedCircle,
-        roundsMissed: r.account.roundsMissed,
-      })));
-      let completed = 0;
-      let missed = 0;
-      for (const r of records) {
-        if (r.account.completedCircle) {
-          completed += 1;
-        }
-        missed += r.account.roundsMissed || 0;
-      }
-      return { completed, missed };
-    } catch (e) {
-      console.error('getWalletHistory', e);
-      return null;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection]);
-
-  // ── finalizeMember ────────────────────────────────────────────
-  const finalizeMember = useCallback(async (circleId: string, memberAddr: string, silent?: boolean): Promise<boolean> => {
-    if (!wallet.publicKey) { if (!silent) addToast('Connect your wallet first', 'error'); return false; }
-    const program = getProgram();
-    if (!program) return false;
-
-    if (!silent) setIsLoading(true);
-    try {
-      const circlePda = new PublicKey(circleId);
-      const memberPubkey = new PublicKey(memberAddr);
-      const [memberRecordPda] = findMemberRecordPda(circlePda, memberPubkey);
-
-      await (program.methods as any)
-        .finalizeMember()
-        .accounts({
-          caller: wallet.publicKey,
-          circle: circlePda,
-          member: memberPubkey,
-          memberRecord: memberRecordPda,
-        })
-        .rpc();
-
-      const truncated = memberAddr.slice(0, 4) + '…' + memberAddr.slice(-4);
-      if (!silent) addToast(`Finalized record for member ${truncated}!`, 'success');
-      return true;
-    } catch (e: any) {
-      console.error('finalizeMember', e);
-      if (!silent) addToast(e.message ?? 'Failed to finalize member record', 'error');
-      return false;
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet.publicKey, connection, addToast]);
-
   return (
     <HuiContext.Provider value={{
       circles, currentCircle, isLoading, toasts,
       addToast, removeToast,
       loadCircles, loadCircle, lookupInviteCode,
       createCircle, joinCircle, startCircle, contribute, triggerPayout,
-      getMemberReputation, getWalletHistory, finalizeMember,
+      getMemberReputation,
     }}>
       {children}
     </HuiContext.Provider>
