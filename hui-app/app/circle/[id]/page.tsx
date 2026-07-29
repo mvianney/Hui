@@ -21,7 +21,7 @@ export default function CircleDashboard() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { publicKey } = useWallet();
-  const { loadCircle, startCircle, contribute, triggerPayout, getWalletHistory, isLoading } = useHui();
+  const { loadCircle, startCircle, contribute, triggerPayout, getWalletHistory, finalizeMember, isLoading } = useHui();
 
   const [circle, setCircle] = useState<Circle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +35,23 @@ export default function CircleDashboard() {
   }, [id, loadCircle]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Background self-healing finalizer for completed circles
+  useEffect(() => {
+    if (!circle || circle.status !== 'completed' || !publicKey) return;
+    const healFinalization = async () => {
+      console.log('[Dashboard] Auto-healing completed circle member finalizations...');
+      for (const member of circle.members) {
+        try {
+          await finalizeMember(circle.id, member.wallet, true);
+        } catch {
+          // Ignore
+        }
+      }
+    };
+    healFinalization();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circle, publicKey]);
 
   // Fetch histories for all members
   useEffect(() => {

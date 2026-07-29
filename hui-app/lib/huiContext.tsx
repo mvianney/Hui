@@ -44,7 +44,7 @@ interface HuiContextValue {
   triggerPayout: (circleId: string) => Promise<boolean>;
   getMemberReputation: (circle: Circle, wallet: string) => MemberReputation | null;
   getWalletHistory: (wallet: string) => Promise<{ completed: number; missed: number } | null>;
-  finalizeMember: (circleId: string, memberAddr: string) => Promise<boolean>;
+  finalizeMember: (circleId: string, memberAddr: string, silent?: boolean) => Promise<boolean>;
 }
 
 const HuiContext = createContext<HuiContextValue | null>(null);
@@ -660,12 +660,12 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
   }, [connection]);
 
   // ── finalizeMember ────────────────────────────────────────────
-  const finalizeMember = useCallback(async (circleId: string, memberAddr: string): Promise<boolean> => {
-    if (!wallet.publicKey) { addToast('Connect your wallet first', 'error'); return false; }
+  const finalizeMember = useCallback(async (circleId: string, memberAddr: string, silent?: boolean): Promise<boolean> => {
+    if (!wallet.publicKey) { if (!silent) addToast('Connect your wallet first', 'error'); return false; }
     const program = getProgram();
     if (!program) return false;
 
-    setIsLoading(true);
+    if (!silent) setIsLoading(true);
     try {
       const circlePda = new PublicKey(circleId);
       const memberPubkey = new PublicKey(memberAddr);
@@ -682,14 +682,14 @@ export function HuiProvider({ children }: { children: React.ReactNode }) {
         .rpc();
 
       const truncated = memberAddr.slice(0, 4) + '…' + memberAddr.slice(-4);
-      addToast(`Finalized record for member ${truncated}!`, 'success');
+      if (!silent) addToast(`Finalized record for member ${truncated}!`, 'success');
       return true;
     } catch (e: any) {
       console.error('finalizeMember', e);
-      addToast(e.message ?? 'Failed to finalize member record', 'error');
+      if (!silent) addToast(e.message ?? 'Failed to finalize member record', 'error');
       return false;
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet.publicKey, connection, addToast]);
