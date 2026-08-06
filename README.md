@@ -6,6 +6,7 @@
 ## 🔗 Live Demo
 * **App URL:** [https://hui-mu.vercel.app](https://hui-mu.vercel.app)
 * **Target Network:** Solana Devnet
+* 📄 Pitch Deck: [Hui-OnChain-Pitch-Deck.pdf](./Hui-OnChain-Pitch-Deck.pdf)
 * **Testing Guide:**
   1. Install the [Phantom Wallet](https://phantom.app/) browser extension and switch the network settings to **Devnet**.
   2. Visit [https://hui-mu.vercel.app](https://hui-mu.vercel.app).
